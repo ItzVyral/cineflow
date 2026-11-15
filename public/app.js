@@ -280,7 +280,7 @@
     const article = document.createElement("article")
     article.className = "carte"
 
-    const lien = `/titre/${item.type}/${item.id}`
+    const lien = item.type === "movie" ? `/film/${item.id}` : `/serie/${item.id}`
     const affiche = document.createElement("a")
     affiche.className = "affiche"
     affiche.href = lien
@@ -361,71 +361,6 @@
     }
   }
 
-  // --- Reprise de lecture --------------------------------------------------
-
-  function suivreLecture() {
-    const lecteur = document.querySelector("iframe[data-lecteur]")
-    if (!lecteur) return
-
-    const media = lecteur.dataset.media === "tv" ? "tv" : "movie"
-    const id = Number(lecteur.dataset.id)
-    const saison = media === "tv" ? Number(lecteur.dataset.season) || 0 : 0
-    const episode = media === "tv" ? Number(lecteur.dataset.episode) || 0 : 0
-    const reprise = Number(lecteur.dataset.reprise) || 0
-    let dernierePosition = 0
-    let derniereDuree = 0
-    let derniereSauvegarde = 0
-    let aRepris = false
-
-    const enregistrer = (position, duree, keepalive = false) => {
-      if (!connecte || !Number.isFinite(position) || position < 0) return
-      fetch(`/api/historique/${media}/${id}`, {
-        method: "PUT",
-        credentials: "same-origin",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ position, duration: duree, season: saison, episode }),
-        keepalive,
-      }).catch(() => {})
-    }
-
-    window.addEventListener("message", (event) => {
-      // On n'écoute que le lecteur HeiwaStream, jamais une origine tierce.
-      if (event.origin !== "https://heiwastream.fr") return
-      const donnees = event.data
-      if (!donnees || typeof donnees !== "object") return
-
-      // D'après la doc « Parler au lecteur », seek n'agit qu'une fois la vidéo chargée :
-      // on reprend au premier play, pas à ready.
-      if (donnees.heiwa === "play" && reprise > 10 && !aRepris) {
-        aRepris = true
-        lecteur.contentWindow?.postMessage({ heiwa: "seek", position: reprise }, "https://heiwastream.fr")
-      }
-
-      if (donnees.heiwa === "time") {
-        const position = Number(donnees.position)
-        const duree = Number(donnees.duration)
-        if (!Number.isFinite(position)) return
-
-        dernierePosition = position
-        derniereDuree = Number.isFinite(duree) ? duree : derniereDuree
-
-        // Événement toutes les 5 s : on enregistre au maximum toutes les 15 s.
-        if (Date.now() - derniereSauvegarde >= 15_000) {
-          derniereSauvegarde = Date.now()
-          enregistrer(position, derniereDuree)
-        }
-      }
-
-      if (donnees.heiwa === "ended") {
-        enregistrer(derniereDuree || dernierePosition, derniereDuree, true)
-      }
-    })
-
-    window.addEventListener("pagehide", () => {
-      if (dernierePosition > 0) enregistrer(dernierePosition, derniereDuree, true)
-    })
-  }
-
   // --- Menus ---------------------------------------------------------------
 
   function fermerMenus() {
@@ -442,6 +377,5 @@
   enregistrerVueLocale()
   afficherRecentsLocaux()
   demarrerHeros()
-  suivreLecture()
   fermerMenus()
 })()

@@ -6,6 +6,7 @@
 // supprime ses données. La base ciblée est celle de DATA_DIR (défaut `data`).
 import { spawnSync } from "node:child_process"
 import fs from "node:fs"
+import os from "node:os"
 import path from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 
@@ -70,23 +71,53 @@ verifier("accueil : cartes avec badge", accueil.texte.includes("badge-media"))
 verifier("accueil : rangée nouveautés", accueil.texte.includes("Nouveautés"))
 verifier("accueil : recherche multi-type", accueil.texte.includes("Film, série, animé"))
 verifier("accueil invité : emplacement récemment vus", accueil.texte.includes("data-recents-locaux"))
+verifier("accueil : liens vers /serie", accueil.texte.includes('href="/serie/'))
 
-const film = await page("/titre/movie/550")
-verifier("GET /titre/movie/550 → 200", film.statut === 200)
+const film = await page("/film/550")
+verifier("GET /film/550 → 200", film.statut === 200, String(film.statut))
 verifier("film : lecteur /embed/movie/550", film.texte.includes("heiwastream.fr/embed/movie/550"))
+verifier("film : paramètres du lecteur", film.texte.includes("site=") && film.texte.includes("report=1"))
+verifier("film : structure du cadre", film.texte.includes("lecteur-cadre") && film.texte.includes("barre-lecteur"))
+verifier("film : retour et copie du lien", film.texte.includes("data-retour") && film.texte.includes("data-copier"))
+verifier("film : pas de panneau série", !film.texte.includes("class=\"panneau\""))
+verifier("film : script du lecteur", film.texte.includes('/player.js'))
 verifier("film : chip Film", film.texte.includes(">Film<"))
 verifier("film : boutons typés movie", film.texte.includes('data-media="movie" data-id="550"'))
 verifier("film : données pour les récents locaux", film.texte.includes('data-vue-type="movie" data-vue-id="550"'))
 verifier("film : affiche des récents locaux", film.texte.includes('data-vue-affiche="https://image.tmdb.org/t/p/w342'))
+verifier("film : fiche TMDB complète", film.texte.includes('class="fiche"') && film.texte.includes("Casting") && film.texte.includes("Titres similaires"))
+verifier("film : bande-annonce accessible", film.texte.includes("data-bande-annonce=") && film.texte.includes("role=\"dialog\""))
 
-const serie = await page("/titre/tv/46260")
-verifier("GET /titre/tv/46260 → 200", serie.statut === 200)
-verifier("série : sélecteur saison", serie.texte.includes('name="season"') && serie.texte.includes('name="episode"'))
-verifier("série : lecteur /embed/tv/46260", /heiwastream\.fr\/embed\/tv\/46260\/\d{2}\/\d{2}/.test(serie.texte))
-verifier("série : chip Anime", serie.texte.includes(">Anime<"))
+const serie = await page("/serie/46260/1/1")
+verifier("GET /serie/46260/1/1 → 200", serie.statut === 200, String(serie.statut))
+verifier("série : lecteur /embed/tv/46260/1/1", /heiwastream\.fr\/embed\/tv\/46260\/1\/1\?/.test(serie.texte))
+verifier("série : paramètres du lecteur", ["site=", "color=ff0033", "progress=ff0033", "bg=101012", "name=CineFlow", "room=0", "report=1", "episodes=0"].every((p) => serie.texte.includes(p)))
+verifier("série : panneau présent", serie.texte.includes('class="panneau"') && serie.texte.includes("data-panneau-contenu"))
+verifier("série : en-tête du panneau", serie.texte.includes("En lecture") && serie.texte.includes("S01E01"))
+verifier("série : onglets accessibles", serie.texte.includes('role="tablist"') && serie.texte.includes('role="tab"') && serie.texte.includes("Langues ·") && serie.texte.includes("Épisodes ·"))
+verifier("série : épisode actif", serie.texte.includes('aria-current="true"') && serie.texte.includes("En lecture"))
+verifier("série : liste des épisodes", serie.texte.includes("episodes-liste") && serie.texte.includes("episode-titre"))
+verifier("série : langues proposées", serie.texte.includes("langues-liste") && serie.texte.includes("aria-pressed="))
+verifier("série : bouton suivant", serie.texte.includes("data-suivant") && serie.texte.includes("Suivant · Saison"))
+verifier("série : genre Animation", serie.texte.includes('<span class="chip">Animation</span>'))
+verifier("série : saisons TMDB", serie.texte.includes("<h2>Saisons</h2>") && serie.texte.includes("saison-carte"))
+verifier("série : fiche TMDB complète", serie.texte.includes("Casting") && serie.texte.includes("Titres similaires"))
 
-const serieS2 = await page("/titre/tv/46260?season=2&episode=3")
-verifier("série S2 E3 retombe sur E53", serieS2.texte.includes("S2 E53"))
+const serieS2 = await page("/serie/46260/2")
+verifier("/serie/46260/2 → 302", serieS2.statut === 302, String(serieS2.statut))
+verifier("/serie/46260/2 → premier épisode", /^\/serie\/46260\/2\/\d+/.test(serieS2.entetes.get("location") ?? ""))
+
+const serieRacine = await page("/serie/46260")
+verifier("/serie/46260 → 302", serieRacine.statut === 302, String(serieRacine.statut))
+verifier("/serie/46260 → S1E1 avec reprise", serieRacine.entetes.get("location") === "/serie/46260/1/1?reprise=1")
+
+const panneau = await page("/serie/46260/2/panneau?actifSaison=1&actifEpisode=5&lang=vostfr")
+verifier("panneau JSON → 200", panneau.statut === 200, String(panneau.statut))
+const donneesPanneau = JSON.parse(panneau.texte)
+verifier("panneau JSON : HTML complet", typeof donneesPanneau.html === "string" && donneesPanneau.html.includes("panneau-onglets"))
+verifier("panneau JSON : saison affichée", donneesPanneau.saison === 2 && donneesPanneau.actifSaison === 1 && donneesPanneau.actifEpisode === 5)
+verifier("panneau JSON : langue active", donneesPanneau.langue === "vostfr")
+verifier("panneau JSON : pas de cache", panneau.entetes.get("cache-control") === "no-store")
 
 const anime = await page("/catalogue?type=anime")
 verifier("GET /catalogue?type=anime → 200", anime.statut === 200)
@@ -104,7 +135,7 @@ verifier("recherche animé : uniquement Anime", rechercheAnime.texte.includes('b
 const rechercheFilm = await page("/recherche?q=matrix")
 verifier("recherche mixte → 200", rechercheFilm.statut === 200)
 verifier("recherche mixte : cartes Film", rechercheFilm.texte.includes('badge-media">Film'))
-verifier("recherche mixte : liens /titre/movie/603", rechercheFilm.texte.includes('href="/titre/movie/603"'))
+verifier("recherche mixte : liens /film/603", rechercheFilm.texte.includes('href="/film/603"'))
 
 const rechercheCourte = await page("/recherche?q=a")
 verifier("recherche trop courte : message", rechercheCourte.texte.includes("au moins 2 caractères"))
@@ -112,17 +143,18 @@ verifier("recherche trop courte : message", rechercheCourte.texte.includes("au m
 const animeVide = await page("/recherche?q=arcane&type=anime")
 verifier("recherche animé sans résultat : « Aucun animé »", animeVide.texte.includes("Aucun animé"))
 
-const redirectionFilm = await page("/film/550")
-verifier("/film/550 → 301", redirectionFilm.statut === 301, String(redirectionFilm.statut))
-verifier("/film/550 → /titre/movie/550", redirectionFilm.entetes.get("location") === "/titre/movie/550")
+const ancienneFicheFilm = await page("/titre/movie/550")
+verifier("/titre/movie/550 → 301", ancienneFicheFilm.statut === 301, String(ancienneFicheFilm.statut))
+verifier("/titre/movie/550 → /film/550", ancienneFicheFilm.entetes.get("location") === "/film/550")
 
-const redirectionSerie = await page("/serie/1399?season=2")
-verifier("/serie/1399 → 301", redirectionSerie.statut === 301)
-verifier("/serie/1399 conserve la query", redirectionSerie.entetes.get("location") === "/titre/tv/1399?season=2")
+const ancienneFicheSerie = await page("/titre/tv/46260?season=2&episode=53")
+verifier("/titre/tv/… → 301", ancienneFicheSerie.statut === 301)
+verifier("/titre/tv/… → /serie/46260/2/53", ancienneFicheSerie.entetes.get("location") === "/serie/46260/2/53")
 
-const introuvable = await page("/titre/tv/999999999")
-verifier("/titre/tv/999999999 → 404", introuvable.statut === 404)
-verifier("/titre/movie/abc → 404", (await page("/titre/movie/abc")).statut === 404)
+const introuvable = await page("/film/999999999")
+verifier("/film/999999999 → 404", introuvable.statut === 404)
+verifier("/film/abc → 404", (await page("/film/abc")).statut === 404)
+verifier("/serie/46260/abc/1 → 404", (await page("/serie/46260/abc/1")).statut === 404)
 
 // --- API : authentification et CSRF ----------------------------------------
 
@@ -135,6 +167,22 @@ const csrf = await requete("/api/favoris/movie/550", {
   entetes: { Origin: "https://evil.example" },
 })
 verifier("API origine externe → 403", csrf.statut === 403, String(csrf.statut))
+
+// --- API : demandes de titres ----------------------------------------------
+
+const demandeType = await requete("/api/demande", { methode: "POST", corps: { type: "anime", id: 550 } })
+verifier("POST /api/demande type invalide → 404", demandeType.statut === 404)
+
+const demandeSaison = await requete("/api/demande", { methode: "POST", corps: { type: "tv", id: 46260 } })
+verifier("POST /api/demande série sans saison → 400", demandeSaison.statut === 400)
+
+// 550 est disponible : HeiwaStream renvoie « already_available » sans créer de
+// nouvelle demande. Cela vérifie le mapping des statuts sans effet de bord.
+const demandeDispo = await requete("/api/demande", { methode: "POST", corps: { type: "movie", id: 550 } })
+const corpsDemande = JSON.parse(demandeDispo.texte)
+verifier("POST /api/demande disponible → 200", demandeDispo.statut === 200, String(demandeDispo.statut))
+verifier("POST /api/demande disponible : rechargement", corpsDemande.ok === true && corpsDemande.recharger === true)
+verifier("POST /api/demande disponible : statut", ["already_available", "already_requested"].includes(corpsDemande.statut))
 
 // --- API : favoris et liste typés -----------------------------------------
 
@@ -153,11 +201,11 @@ const listeFilm = await requete("/api/liste/movie/550", { methode: "POST", avecC
 verifier("POST liste film → 200", listeFilm.statut === 200)
 
 const favoris = await page("/favoris", { avecCookie: true })
-verifier("/favoris contient le film", favoris.texte.includes('href="/titre/movie/550"'))
-verifier("/favoris contient la série", favoris.texte.includes('href="/titre/tv/46260"'))
+verifier("/favoris contient le film", favoris.texte.includes('href="/film/550"'))
+verifier("/favoris contient la série", favoris.texte.includes('href="/serie/46260"'))
 
 const liste = await page("/liste", { avecCookie: true })
-verifier("/liste contient le film", liste.texte.includes('href="/titre/movie/550"'))
+verifier("/liste contient le film", liste.texte.includes('href="/film/550"'))
 
 // --- API : historique et reprise ------------------------------------------
 
@@ -178,13 +226,17 @@ verifier("PUT historique saison invalide → 400", saisonInvalide.statut === 400
 const progression = db.progression(UTILISATEUR, "tv", 46260)
 verifier("DB : saison et épisode enregistrés", progression?.season === 2 && progression?.episode === 53)
 
-const reprise = await page("/titre/tv/46260?season=2&episode=53", { avecCookie: true })
+const reprise = await page("/serie/46260/2/53", { avecCookie: true })
 verifier("page série : data-reprise=100", reprise.texte.includes('data-reprise="100"'))
 verifier("page série : texte de reprise", reprise.texte.includes("Reprise à 1 min 40 s"))
 
+const serieReprise = await page("/serie/46260", { avecCookie: true })
+verifier("/serie/46260 connecté → dernier épisode", serieReprise.statut === 302 && serieReprise.entetes.get("location") === "/serie/46260/2/53")
+
 const accueilConnecte = await page("/", { avecCookie: true })
 verifier("accueil connecté : Continuer de regarder", accueilConnecte.texte.includes("Continuer de regarder"))
-verifier("accueil connecté : sous-titre S2 · E53", accueilConnecte.texte.includes("S2 · E53"))
+verifier("accueil connecté : sous-titre S02E53", accueilConnecte.texte.includes("S02E53"))
+verifier("accueil connecté : lien vers l'épisode", accueilConnecte.texte.includes('href="/serie/46260/2/53"'))
 
 // --- API : avis -------------------------------------------------------------
 
@@ -230,9 +282,9 @@ verifier("nameplate : palette inconnue refusée", !estPaletteNameplate("inconnue
 // --- Titres récemment vus ---------------------------------------------------
 
 // Visiter une fiche connecté l'enregistre côté SQLite, sans doublon.
-await page("/titre/movie/550", { avecCookie: true })
-await page("/titre/movie/603", { avecCookie: true })
-await page("/titre/movie/550", { avecCookie: true })
+await page("/film/550", { avecCookie: true })
+await page("/film/603", { avecCookie: true })
+await page("/film/550", { avecCookie: true })
 
 const vues = db.listerVues(UTILISATEUR)
 verifier("DB : titres récemment vus enregistrés", vues.length >= 2)
@@ -265,8 +317,8 @@ verifier("DB : utilisateur de test supprimé", db.utilisateur(UTILISATEUR) == nu
 // --- Migrations isolées (v1 → v5, base neuve) ------------------------------
 
 const racine = RACINE
-const dossierV1 = "/tmp/cineflow-test-v1"
-const dossierNeuf = "/tmp/cineflow-test-neuf"
+const dossierV1 = path.join(os.tmpdir(), "cineflow-test-v1")
+const dossierNeuf = path.join(os.tmpdir(), "cineflow-test-neuf")
 fs.rmSync(dossierV1, { recursive: true, force: true })
 fs.rmSync(dossierNeuf, { recursive: true, force: true })
 fs.mkdirSync(dossierV1, { recursive: true })
@@ -274,7 +326,7 @@ fs.mkdirSync(dossierNeuf, { recursive: true })
 
 const scriptV1 = `
 import Database from "better-sqlite3"
-const db = new Database(${JSON.stringify(`${dossierV1}/cineflow.db`)})
+const db = new Database(${JSON.stringify(path.join(dossierV1, "cineflow.db"))})
 db.pragma("journal_mode = WAL")
 db.exec(\`
   CREATE TABLE users (id TEXT PRIMARY KEY, username TEXT NOT NULL, avatar TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')));
@@ -293,9 +345,10 @@ db.close()
 const migration = spawnSync(process.execPath, ["--input-type=module", "-e", scriptV1], { cwd: racine, encoding: "utf8" })
 verifier("migration : schéma v1 créé", migration.status === 0, migration.stderr)
 
+const urlDbV1 = `${pathToFileURL(path.join(RACINE, "src/db.js")).href}?test-v1`
 const scriptVerifV1 = `
 process.env.DATA_DIR = ${JSON.stringify(dossierV1)}
-const m = await import(${JSON.stringify(`${racine}/src/db.js?test-v1`)})
+const m = await import(${JSON.stringify(urlDbV1)})
 const out = {
   version: m.db.pragma("user_version", { simple: true }),
   favoris: m.listerFavoris("u1").map((l) => [l.media_type, l.tmdb_id]),
@@ -323,9 +376,10 @@ verifier("migration v1 : nameplate nulle", v1?.nameplate === null && v1?.palette
 verifier("migration v1 : aucune vue récente", v1?.vues === 0)
 verifier("migration v1 : intégrité OK", v1?.fk === 0 && v1?.integrite === "ok")
 
+const urlDbNeuf = `${pathToFileURL(path.join(RACINE, "src/db.js")).href}?test-neuf`
 const scriptNeuf = `
 process.env.DATA_DIR = ${JSON.stringify(dossierNeuf)}
-const m = await import(${JSON.stringify(`${racine}/src/db.js?test-neuf`)})
+const m = await import(${JSON.stringify(urlDbNeuf)})
 console.log(JSON.stringify({
   version: m.db.pragma("user_version", { simple: true }),
   tables: m.db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all().map((t) => t.name),

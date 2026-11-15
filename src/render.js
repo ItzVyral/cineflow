@@ -107,7 +107,7 @@ function boutonListe(media, id, actif) {
 }
 
 /** Boutons avec libellé visible, pour la page d'un titre. */
-export function boutonsMedia(type, id, favori, liste) {
+export function boutonsMedia(type, id, favori, liste, { extra = "" } = {}) {
   return `<div class="actions-film">
     <button type="button" class="act act-texte coeur" data-action="favori" data-media="${type}" data-id="${id}"
       aria-pressed="${favori}" aria-label="${favori ? "Retirer des favoris" : "Ajouter aux favoris"}">
@@ -117,6 +117,7 @@ export function boutonsMedia(type, id, favori, liste) {
       aria-pressed="${liste}" aria-label="${liste ? "Retirer de ma liste" : "Ajouter à ma liste"}">
       ${svgPlus}<span>${liste ? "Dans ma liste" : "À regarder plus tard"}</span>
     </button>
+    ${extra}
   </div>`
 }
 
@@ -128,7 +129,7 @@ export function carte(media, { favori = false, liste = false, progression = null
   const id = Number(media.id)
   const type = media.type === "tv" ? "tv" : "movie"
   const titre = media.titre ?? media.title ?? media.name ?? "Sans titre"
-  const href = lien ?? `/titre/${type}/${id}`
+  const href = lien ?? (type === "tv" ? `/serie/${id}` : `/film/${id}`)
   const affiche = media.poster_path
     ? `<img loading="lazy" src="${IMG}w342${e(media.poster_path)}" alt="Affiche de ${e(titre)}">`
     : `<span class="sans-affiche"><span>${e(titre)}</span></span>`
@@ -201,7 +202,7 @@ const liensNav = [
 /**
  * Gabarit HTML commun. Tout ce qui vient de la base ou de TMDB doit être passé par e().
  */
-export function page({ titre, corps, actif = "", user = null, recherche = "", chemin = "/", nomPage = "", description = "" }) {
+export function page({ titre, corps, actif = "", user = null, recherche = "", chemin = "/", nomPage = "", description = "", scripts = ["/app.js"] }) {
   const nav = liensNav.map(([cle, href, libelle]) => `<a class="pill${actif === cle ? " on" : ""}" href="${href}"
     ${actif === cle ? 'aria-current="page"' : ""}>${libelle}</a>`).join("")
 
@@ -235,7 +236,7 @@ ${description ? `<meta name="description" content="${e(description)}">` : ""}
 </header>
 ${corps}
 <footer>Données et images : TMDB. Ce site utilise l'API TMDB mais n'est ni approuvé ni certifié par TMDB.</footer>
-<script src="/app.js" defer></script>
+${scripts.map((src) => `<script src="${e(src)}" defer></script>`).join("\n")}
 </body>
 </html>`
 }

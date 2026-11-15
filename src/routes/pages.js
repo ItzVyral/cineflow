@@ -5,10 +5,14 @@ import {
   avisTitre,
   catalogue,
   disponibilite,
+  disponibilitesLot,
   episodes,
   fiche,
+  jetonSansPub,
   nouveautes,
   rechercherHeiwa,
+  saisonTmdb,
+  titreHeiwa,
   topTitres,
 } from "../heiwa.js"
 import {
@@ -24,6 +28,7 @@ import {
   boutonsMedia,
   carte,
   chipsInfos,
+  duree,
   e,
   etatVide,
   page,
@@ -167,14 +172,41 @@ async function blocContinuer(user, etats, lignes = db.historiqueContinu(user.id,
       favori: etats.favoris.has(cleMedia(ligne.media_type, ligne.tmdb_id)),
       liste: etats.liste.has(cleMedia(ligne.media_type, ligne.tmdb_id)),
       progression,
-      sousTitre: estSerie ? `S${ligne.season} · E${ligne.episode}` : "",
-      lien: estSerie ? `/titre/tv/${ligne.tmdb_id}?season=${ligne.season}&episode=${ligne.episode}` : null,
+      sousTitre: estSerie ? `S${String(ligne.season).padStart(2, "0")}E${String(ligne.episode).padStart(2, "0")}` : "",
+      lien: estSerie ? `/serie/${ligne.tmdb_id}/${ligne.season}/${ligne.episode}` : null,
     })
   })).join("")
 
   if (!cartes) return ""
   return `<h2>Continuer de regarder</h2><div class="rang">${cartes}</div>`
 }
+
+/** Rangée des derniers titres consultés par un compte connecté. */
+async function blocRecemmentVus(user, etats, exclure = new Set()) {
+  const lignes = db.listerVues(user.id, 12)
+  const cartes = (await parLots(lignes, async (ligne) => {
+    const cle = cleMedia(ligne.media_type, ligne.tmdb_id)
+    if (exclure.has(cle)) return ""
+    try {
+      const media = await fiche(ligne.media_type, ligne.tmdb_id)
+      return carte(media, {
+        favori: etats.favoris.has(cle),
+        liste: etats.liste.has(cle),
+      })
+    } catch {
+      return ""
+    }
+  })).join("")
+
+  if (!cartes) return ""
+  return `<h2>Récemment vus</h2><div class="rang">${cartes}</div>`
+}
+
+// Rempli côté navigateur pour les visiteurs non connectés (voir public/app.js).
+const blocRecentsLocaux = `<section data-recents-locaux hidden>
+  <h2>Récemment vus</h2>
+  <div class="rang"></div>
+</section>`
 
 async function blocAvis(type, id) {
   let donnees
@@ -270,25 +302,479 @@ function listeSaisons(media) {
     episodes: 0,
     nom: "",
     date: "",
+    poster_path: null,
   }))
 }
 
-function formulaireEpisodes(id, saisons, saison, listeEpisodes, episode) {
-  if (!saisons.length) return ""
+// --- Lecteur ----------------------------------------------------------------
+
+const LANGUES_LISIBLES = {
+  vf: "VF",
+  vostfr: "VOSTFR",
+  vo: "VO",
+  vovf: "VO/VF",
+  multi: "Multi",
+}
+
+const DESCRIPTIONS_LANGUES = {
+  vf: "Version française",
+  vostfr: "Version originale sous-titrée en français",
+  vo: "Version originale",
+  vovf: "Version originale et version française",
+  multi: "Plusieurs langues",
+}
+
+const PREFIXE_EMBED = "https://heiwastream.fr/embed"
+
+function codeLangue(langue) {
+  if (typeof langue === "string") return langue.trim().toLowerCase()
+  if (!langue || typeof langue !== "object") return ""
+  const valeur = langue.code ?? langue.lang ?? langue.language ?? langue.id ?? langue.name ?? ""
+  return String(valeur).trim().toLowerCase()
+}
+
+function libelleLangue(code) {
+  return LANGUES_LISIBLES[code] ?? String(code).toUpperCase()
+}
+
+function languesUniques(liste) {
+  const vues = new Set()
+  const langues = []
+  for (const element of Array.isArray(liste) ? liste : []) {
+    const code = codeLangue(element)
+    if (!code || vues.has(code)) continue
+    vues.add(code)
+    langues.push({
+      code,
+      libelle: libelleLangue(code),
+      description: DESCRIPTIONS_LANGUES[code] ?? "",
+    })
+  }
+  return langues
+}
+
+function languesDeDispo(dispo, secours = []) {
+  const source = Array.isArray(dispo?.languages) && dispo.languages.length
+    ? dispo.languages
+    : secours
+  return languesUniques(source)
+}
+
+function langueActive(langues, demandee) {
+  const code = codeLangue(demandee)
+  return langues.find((langue) => langue.code === code)?.code ?? langues[0]?.code ?? ""
+}
+
+function codeEpisode(saison, episode) {
+  return `S${String(saison).padStart(2, "0")}E${String(episode).padStart(2, "0")}`
+}
+
+function dureeMinutes(minutes) {
+  const nombre = Number(minutes)
+  if (!Number.isFinite(nombre) || nombre <= 0) return ""
+  if (nombre < 60) return `${Math.round(nombre)} min`
+  return `${Math.floor(nombre / 60)} h ${String(Math.round(nombre % 60)).padStart(2, "0")}`
+}
+
+function dateCourte(valeur) {
+  if (!valeur) return ""
+  const texte = String(valeur)
+  const date = /^\d{4}-\d{2}-\d{2}$/.test(texte)
+    ? new Date(`${texte}T12:00:00Z`)
+    : new Date(texte)
+  if (Number.isNaN(date.getTime())) return texte
+  return date.toLocaleDateString("fr-FR", { day: "numeric", month: "short", year: "numeric" })
+}
+
+function initiales(nom) {
+  return String(nom ?? "")
+    .split(/\s+/)
+    .filter(Boolean)
+    .slice(0, 2)
+    .map((mot) => mot[0]?.toUpperCase() ?? "")
+    .join("")
+}
+
+function sourceLecteur(type, id, saison = null, episode = null) {
+  const parametres = new URLSearchParams()
+  parametres.set("site", process.env.HEIWA_SITE ?? "")
+
+  if (type === "tv") {
+    parametres.set("color", "ff0033")
+    parametres.set("progress", "ff0033")
+    parametres.set("bg", "101012")
+    parametres.set("name", "CineFlow")
+    parametres.set("room", "0")
+    parametres.set("report", "1")
+    parametres.set("episodes", "0")
+  } else {
+    parametres.set("report", "1")
+  }
+
+  const chemin = type === "tv"
+    ? `${PREFIXE_EMBED}/tv/${id}/${saison}/${episode}`
+    : `${PREFIXE_EMBED}/movie/${id}`
+
+  return {
+    base: `${chemin}?${parametres.toString()}`,
+    avecReprise(langue = "", reprise = 0) {
+      const url = new URL(this.base)
+      if (type === "tv" && langue) url.searchParams.set("lang", langue)
+      if (reprise > 0) url.searchParams.set("t", String(Math.floor(reprise)))
+      return url.toString()
+    },
+  }
+}
+
+function normaliserListeEpisodes(listeHeiwa, tmdbSaison, saison) {
+  const details = new Map(
+    (Array.isArray(tmdbSaison?.episodes) ? tmdbSaison.episodes : [])
+      .map((element) => [Number(element?.episode_number), element]),
+  )
+
+  return (Array.isArray(listeHeiwa) ? listeHeiwa : [])
+    .map((element) => {
+      const numero = Number(element?.episode)
+      if (!Number.isInteger(numero) || numero <= 0) return null
+      const detail = details.get(numero) ?? null
+      return {
+        saison: Number(element?.season) || saison,
+        episode: numero,
+        titre: detail?.name || element?.title || `Épisode ${numero}`,
+        image: detail?.still_path ?? null,
+        duree: Number(detail?.runtime) || null,
+        date: detail?.air_date ?? element?.air_date ?? "",
+        langues: languesUniques(element?.languages),
+      }
+    })
+    .filter(Boolean)
+}
+
+async function donneesPanneau({
+  media,
+  saisonAffichee,
+  actifSaison,
+  actifEpisode,
+  langueDemandee,
+  dispo = null,
+  sansPub = null,
+}) {
+  const id = Number(media.id)
+  const saisons = listeSaisons(media)
+    .filter((element) => Number(element.saison) > 0)
+    .sort((a, b) => Number(a.saison) - Number(b.saison))
+  const affichee = saisons.some((element) => Number(element.saison) === Number(saisonAffichee))
+    ? Number(saisonAffichee)
+    : (Number(saisons[0]?.saison) || Number(saisonAffichee) || 1)
+
+  const [donneesEpisodes, tmdbSaison, dispoActif, jeton] = await Promise.all([
+    episodes(id, affichee).catch(() => null),
+    saisonTmdb(id, affichee).catch(() => null),
+    dispo ?? disponibilite("tv", id, actifSaison, actifEpisode).catch(() => null),
+    sansPub === null ? jetonSansPub() : sansPub,
+  ])
+
+  const bloc = (donneesEpisodes?.seasons ?? []).find((element) => Number(element.season) === affichee)
+  const liste = normaliserListeEpisodes(bloc?.episodes, tmdbSaison, affichee)
+  const langues = languesDeDispo(
+    dispoActif,
+    liste.find((element) => Number(element.episode) === Number(actifEpisode))?.langues ?? [],
+  )
+  const langue = langueActive(langues, langueDemandee)
+
+  // Le bouton « Suivant » dépend de l'épisode réellement en lecture, même quand
+  // le panneau affiche une autre saison.
+  let listeActive = liste
+  if (affichee !== Number(actifSaison)) {
+    const donneesActives = await episodes(id, actifSaison).catch(() => null)
+    const blocActif = (donneesActives?.seasons ?? []).find((element) => Number(element.season) === Number(actifSaison))
+    listeActive = normaliserListeEpisodes(blocActif?.episodes, null, Number(actifSaison))
+  }
+
+  const index = listeActive.findIndex((element) => Number(element.episode) === Number(actifEpisode))
+  let suivant = null
+  if (index >= 0 && index < listeActive.length - 1) {
+    suivant = { saison: Number(actifSaison), episode: listeActive[index + 1].episode }
+  } else if (index === listeActive.length - 1 && listeActive.length) {
+    const prochaineSaison = saisons.find((element) => Number(element.saison) > Number(actifSaison))
+    if (prochaineSaison) {
+      const donneesSuivantes = await episodes(id, prochaineSaison.saison).catch(() => null)
+      const blocSuivant = (donneesSuivantes?.seasons ?? [])
+        .find((element) => Number(element.season) === Number(prochaineSaison.saison))
+      const listeSuivante = normaliserListeEpisodes(blocSuivant?.episodes, null, prochaineSaison.saison)
+      if (listeSuivante.length) {
+        suivant = { saison: prochaineSaison.saison, episode: listeSuivante[0].episode }
+      }
+    }
+  }
+
+  return {
+    saisons,
+    affichee,
+    liste,
+    langues,
+    langue,
+    sansPub: !!jeton,
+    suivant,
+    actifSaison: Number(actifSaison),
+    actifEpisode: Number(actifEpisode),
+  }
+}
+
+function htmlPanneau(donnees, media) {
+  const {
+    saisons,
+    affichee,
+    liste,
+    langues,
+    langue,
+    sansPub,
+    suivant,
+    actifSaison,
+    actifEpisode,
+  } = donnees
+  const id = Number(media.id)
 
   const optionsSaisons = saisons.map((element) => `<option value="${element.saison}"
-    ${element.saison === saison ? "selected" : ""}>Saison ${element.saison}</option>`).join("")
+    ${Number(element.saison) === affichee ? "selected" : ""}>Saison ${element.saison}</option>`).join("")
 
-  const optionsEpisodes = listeEpisodes.length
-    ? listeEpisodes.map((element) => `<option value="${element.episode}"
-      ${Number(element.episode) === episode ? "selected" : ""}>Épisode ${element.episode}${element.title ? ` — ${e(element.title)}` : ""}</option>`).join("")
-    : `<option value="${episode}" selected>Épisode ${episode}</option>`
+  const episodes = liste.map((element) => {
+    const actif = affichee === Number(actifSaison) && Number(element.episode) === Number(actifEpisode)
+    const mini = element.image
+      ? `<img loading="lazy" src="${e(`${IMG}w300${element.image}`)}" alt="" width="150" height="84">`
+      : `<span class="episode-sans-image" aria-hidden="true">E${String(element.episode).padStart(2, "0")}</span>`
+    const infos = [
+      dureeMinutes(element.duree),
+      element.langues.map((langueEpisode) => langueEpisode.libelle).join(" · "),
+      dateCourte(element.date),
+    ].filter(Boolean).join(" · ")
 
-  return `<form class="choix-episode" method="get" action="/titre/tv/${id}">
-    <label>Saison<select name="season">${optionsSaisons}</select></label>
-    <label>Épisode<select name="episode">${optionsEpisodes}</select></label>
-    <button class="play" type="submit">Regarder cet épisode</button>
-  </form>`
+    return `<button type="button" class="episode${actif ? " on" : ""}" data-saison="${element.saison}"
+      data-episode="${element.episode}" ${actif ? 'aria-current="true"' : ""}
+      aria-label="Épisode ${element.episode}${element.titre ? ` : ${e(element.titre)}` : ""}">
+      ${mini}
+      <span class="episode-corps">
+        <span class="episode-titre">E${String(element.episode).padStart(2, "0")} · ${e(element.titre)}</span>
+        ${infos ? `<span class="episode-meta">${e(infos)}</span>` : ""}
+      </span>
+      ${actif ? `<span class="episode-actif">En lecture</span>` : ""}
+    </button>`
+  }).join("")
+
+  const languesHtml = langues.length
+    ? langues.map((element) => {
+      const actif = element.code === langue
+      return `<button type="button" class="langue${actif ? " on" : ""}" data-lang="${e(element.code)}"
+        aria-pressed="${actif}">
+        <span class="langue-code">${e(element.libelle)}</span>
+        ${element.description ? `<span class="langue-desc">${e(element.description)}</span>` : ""}
+        <span class="langue-etat">${actif ? "En lecture" : "Choisir"}</span>
+      </button>`
+    }).join("")
+    : `<p class="vide panneau-vide">Aucune langue annoncée pour cet épisode.</p>`
+
+  const libelleSuivant = suivant
+    ? `Suivant · Saison ${suivant.saison} · E${String(suivant.episode).padStart(2, "0")} ›`
+    : "Dernier épisode"
+
+  return `<div class="panneau-entete">
+    <p class="panneau-sur-titre">En lecture</p>
+    <p class="panneau-titre">${e(media.titre)}</p>
+    <p class="panneau-sous-titre">
+      <span class="panneau-code" data-panneau-code>${e(codeEpisode(actifSaison, actifEpisode))}</span>
+      ${sansPub ? '<span class="badge-sans-pub">Sans publicité</span>' : ""}
+    </p>
+  </div>
+
+  <div class="panneau-onglets" role="tablist" aria-label="Détails de la série">
+    <button type="button" class="panneau-onglet" role="tab" id="onglet-langues"
+      aria-controls="panneau-langues" aria-selected="false" tabindex="-1">Langues · ${langues.length}</button>
+    <button type="button" class="panneau-onglet on" role="tab" id="onglet-episodes"
+      aria-controls="panneau-episodes" aria-selected="true" tabindex="0">Épisodes · ${liste.length}</button>
+  </div>
+
+  <div class="panneau-onglet-contenu" id="panneau-episodes" role="tabpanel" aria-labelledby="onglet-episodes">
+    ${saisons.length > 1 ? `<label class="panneau-saison"><span>Saison</span>
+      <select data-saison-panneau aria-label="Choisir la saison affichée">${optionsSaisons}</select></label>` : ""}
+    <div class="episodes-liste">
+      ${episodes || '<p class="vide panneau-vide">Aucun épisode disponible pour cette saison.</p>'}
+    </div>
+  </div>
+
+  <div class="panneau-onglet-contenu" id="panneau-langues" role="tabpanel" aria-labelledby="onglet-langues" hidden>
+    <div class="langues-liste">${languesHtml}</div>
+  </div>
+
+  <div class="panneau-pied">
+    <button type="button" class="suivant" data-suivant
+      ${suivant ? `data-saison="${suivant.saison}" data-episode="${suivant.episode}"` : "disabled"}>
+      ${e(libelleSuivant)}
+    </button>
+  </div>`
+}
+
+function barreLecteur(media, { estSerie, saison, episode }) {
+  return `<div class="barre-lecteur">
+    <button type="button" class="barre-retour" data-retour>‹ Retour</button>
+    <p class="barre-titre"><b data-titre-lecteur>${e(media.titre)}</b>
+      ${estSerie ? `<span class="barre-code" data-code-episode>${e(codeEpisode(saison, episode))}</span>` : ""}</p>
+    <button type="button" class="barre-copier" data-copier aria-label="Copier le lien de cette page">Copier le lien</button>
+    <span class="sr-only" data-copie-msg role="status" aria-live="polite"></span>
+  </div>`
+}
+
+function blocIndisponible({ type, id, saison, episode, estSerie, verificationImpossible = false }) {
+  if (verificationImpossible) {
+    return `<div class="indisponible">
+      <p class="indisponible-titre">Disponibilité inconnue</p>
+      <p>Impossible de vérifier la disponibilité pour le moment. Recharge la page dans un instant.</p>
+    </div>`
+  }
+
+  const libelle = estSerie ? "Demander cet épisode" : "Demander ce film"
+  return `<div class="indisponible">
+    <p class="indisponible-titre">Pas encore disponible</p>
+    <p>${estSerie ? "Cet épisode" : "Ce film"} n'est pas encore proposé par HeiwaStream. Tu peux envoyer une demande pour le voir arriver sur la plateforme.</p>
+    <form class="demande" data-demande data-type="${e(type)}" data-id="${id}"
+      ${estSerie ? `data-saison="${saison}" data-episode="${episode}"` : ""}>
+      <button class="btn-demande" type="submit">${libelle}</button>
+      <p class="form-msg" role="status" aria-live="polite"></p>
+    </form>
+    <p class="demande-note">Trois demandes par visiteur et par jour au maximum.</p>
+  </div>`
+}
+
+function boutonBandeAnnonce(cle) {
+  return cle
+    ? `<button type="button" class="btn-ligne btn-bande-annonce" data-bande-annonce="${e(cle)}">▶ Bande-annonce</button>`
+    : ""
+}
+
+function modaleBandeAnnonce(cle) {
+  if (!cle) return ""
+  return `<div class="modale" data-modale hidden>
+    <div class="modale-fond" data-fermer></div>
+    <div class="modale-boite" role="dialog" aria-modal="true" aria-labelledby="titre-bande-annonce">
+      <button type="button" class="modale-fermer" data-fermer aria-label="Fermer la bande-annonce">×</button>
+      <h2 class="sr-only" id="titre-bande-annonce">Bande-annonce</h2>
+      <div class="modale-video"><iframe data-video-bande-annonce title="Bande-annonce" allow="autoplay; encrypted-media; picture-in-picture" allowfullscreen></iframe></div>
+    </div>
+  </div>`
+}
+
+function blocCasting(casting) {
+  if (!Array.isArray(casting) || !casting.length) return ""
+  const personnes = casting.map((personne) => {
+    const photo = personne.photo
+      ? `<img loading="lazy" src="${e(`${IMG}w185${personne.photo}`)}" alt="Portrait de ${e(personne.nom)}" width="96" height="96">`
+      : `<span class="personne-sans-photo" aria-hidden="true">${e(initiales(personne.nom))}</span>`
+    return `<article class="personne">
+      <span class="personne-photo">${photo}</span>
+      <p class="personne-nom">${e(personne.nom)}</p>
+      ${personne.personnage ? `<p class="personne-role">${e(personne.personnage)}</p>` : ""}
+    </article>`
+  }).join("")
+
+  return `<h2>Casting</h2><div class="casting-rang">${personnes}</div>`
+}
+
+function blocEquipe(media, estSerie) {
+  const lignes = []
+  if (estSerie && media.createurs?.length) lignes.push(["Création", media.createurs])
+  if (media.realisateurs?.length) lignes.push(["Réalisation", media.realisateurs])
+  if (media.scenaristes?.length) lignes.push(["Scénario", media.scenaristes])
+  if (!lignes.length) return ""
+  return `<dl class="equipe">${lignes.map(([libelle, noms]) =>
+    `<div><dt>${e(libelle)}</dt><dd>${e(noms.join(", "))}</dd></div>`).join("")}</dl>`
+}
+
+function blocSaisons(media, saisonActive) {
+  const saisons = (media.saisonListe ?? []).filter((element) => Number(element.saison) > 0)
+  if (!saisons.length) return ""
+
+  const cartes = saisons.map((saison) => {
+    const active = Number(saison.saison) === Number(saisonActive)
+    const affiche = saison.poster_path
+      ? `<img loading="lazy" src="${e(`${IMG}w185${saison.poster_path}`)}" alt="Affiche de la saison ${saison.saison}" width="185" height="278">`
+      : `<span class="saison-sans-affiche" aria-hidden="true">S${saison.saison}</span>`
+    return `<a class="saison-carte${active ? " on" : ""}" href="/serie/${media.id}/${saison.saison}"
+      ${active ? 'aria-current="page"' : ""}>
+      ${affiche}
+      <span class="saison-nom">Saison ${saison.saison}</span>
+      <span class="saison-meta">${saison.episodes ? `${saison.episodes} épisode${saison.episodes > 1 ? "s" : ""}` : "Épisodes à venir"}</span>
+      ${saison.date ? `<span class="saison-meta">${e(dateCourte(saison.date))}</span>` : ""}
+    </a>`
+  }).join("")
+
+  return `<h2>Saisons</h2><div class="saisons-grille">${cartes}</div>`
+}
+
+function blocTitresSimilaires(similaires, etats) {
+  if (!similaires.length) return ""
+  const cartes = similaires.map((media) => carte(media, {
+    favori: etats.favoris.has(cleMedia(media.type, media.id)),
+    liste: etats.liste.has(cleMedia(media.type, media.id)),
+  })).join("")
+  return `<h2>Titres similaires</h2><div class="rang">${cartes}</div>`
+}
+
+async function similairesDisponibles(media) {
+  const recommandations = Array.isArray(media.recommandations) ? media.recommandations : []
+  if (!recommandations.length) return []
+  try {
+    const dispos = await disponibilitesLot(media.type, recommandations.map((element) => element.id))
+    return recommandations
+      .filter((element) => dispos.get(Number(element.id))?.available === true)
+      .slice(0, 12)
+  } catch {
+    return []
+  }
+}
+
+function blocInfosMedia(media, {
+  type,
+  estSerie,
+  saisonActive,
+  favori,
+  dansListe,
+  similaires,
+  etats,
+}) {
+  const annee = media.date?.slice(0, 4)
+  const note = Number(media.note)
+  const genres = (media.genres ?? []).map((genre) => `<span class="chip">${e(genre)}</span>`).join("")
+  const chips = [
+    annee,
+    estSerie
+      ? (media.saisons ? `${media.saisons} saison${media.saisons > 1 ? "s" : ""}` : "")
+      : duree(media.runtime),
+    Number.isFinite(note) && note > 0 ? `★ ${note.toFixed(1)}` : "",
+  ].filter(Boolean).map((contenu) => `<span class="chip">${e(contenu)}</span>`).join("")
+
+  const affiche = media.poster_path
+    ? `<img src="${e(`${IMG}w342${media.poster_path}`)}" alt="Affiche de ${e(media.titre)}" width="342" height="513">`
+    : `<span class="fiche-sans-affiche">${e(media.titre)}</span>`
+
+  return `<section class="fiche" aria-labelledby="titre-fiche">
+    <div class="fiche-principale">
+      <div class="fiche-affiche">${affiche}</div>
+      <div class="fiche-texte">
+        <h1 id="titre-fiche">${e(media.titre)}</h1>
+        ${media.titreOriginal && media.titreOriginal !== media.titre
+          ? `<p class="titre-original">Titre original : ${e(media.titreOriginal)}</p>` : ""}
+        <div class="chips">${chips}${genres}</div>
+        ${media.slogan ? `<p class="slogan">« ${e(media.slogan)} »</p>` : ""}
+        <p class="resume">${e(media.overview || "Synopsis indisponible.")}</p>
+        ${boutonsMedia(type, media.id, favori, dansListe, {
+          extra: boutonBandeAnnonce(media.bandeAnnonce),
+        })}
+        ${blocEquipe(media, estSerie)}
+      </div>
+    </div>
+    ${blocCasting(media.casting)}
+    ${estSerie ? blocSaisons(media, saisonActive) : ""}
+    ${blocTitresSimilaires(similaires, etats)}
+  </section>`
 }
 
 // --- Accueil ----------------------------------------------------------------
@@ -330,7 +816,7 @@ pagesRouter.get("/", async (req, res, next) => {
       return `<article class="slide${index === 0 ? " on" : ""}"${styleFond}>
         <div class="txt">${titre}
         <div class="chips">${chipsInfos(media)}</div><p>${e(media.overview)}</p>
-        <a class="play" href="/titre/${media.type}/${media.id}">▶ Lecture</a></div></article>`
+        <a class="play" href="${media.type === "tv" ? `/serie/${media.id}` : `/film/${media.id}`}">▶ Lecture</a></div></article>`
     }).join("")
 
     const cartes = medias.map((media) => carte(media, {
@@ -374,23 +860,39 @@ pagesRouter.get("/", async (req, res, next) => {
   }
 })
 
-// --- Page d'un titre --------------------------------------------------------
+// --- Lecteur ----------------------------------------------------------------
 
-pagesRouter.get("/titre/:type/:id", async (req, res, next) => {
-  const type = req.params.type
-  const id = Number(req.params.id)
+function entierPositif(valeur) {
+  const nombre = Number(valeur)
+  return Number.isSafeInteger(nombre) && nombre > 0 ? nombre : null
+}
 
-  if (!estTypeMedia(type) || !Number.isInteger(id) || id <= 0) {
-    return res.status(404).send(pageErreur(404, "Titre introuvable", "Ce titre n'existe pas.", { user: req.user, chemin: req.originalUrl }))
-  }
+function introuvable(req, res, message = "Ce titre n'existe pas.") {
+  return res.status(404).send(pageErreur(
+    404,
+    "Titre introuvable",
+    message,
+    { user: req.user, chemin: req.originalUrl },
+  ))
+}
 
+function repriseLisible(reprise, saison, episode, estSerie) {
+  if (!reprise) return ""
+  return `<p class="reprise-info">Reprise à ${Math.floor(reprise / 60)} min ${String(reprise % 60).padStart(2, "0")} s${estSerie ? ` (${codeEpisode(saison, episode)})` : ""}.</p>`
+}
+
+async function rendreLecture(req, res, next, {
+  type,
+  id,
+  saison = null,
+  episode = null,
+  repriseAuto = false,
+}) {
   let media
   try {
     media = await fiche(type, id)
   } catch (erreur) {
-    if (erreur?.status === 404) {
-      return res.status(404).send(pageErreur(404, "Titre introuvable", "Ce titre n'existe pas.", { user: req.user, chemin: req.originalUrl }))
-    }
+    if (erreur?.status === 404) return introuvable(req, res)
     return next(erreur)
   }
 
@@ -406,132 +908,263 @@ pagesRouter.get("/titre/:type/:id", async (req, res, next) => {
 
   const estSerie = type === "tv"
   const historique = req.user ? db.progression(req.user.id, type, id) : null
-
-  let saison = 1
-  let episode = 1
-  let saisons = []
-  let listeEpisodes = []
-  let episodeChoisi = null
-
-  if (estSerie) {
-    saisons = listeSaisons(media)
-    const saisonHistorique = Number(historique?.season) || 0
-    const saisonDemandee = Number.parseInt(req.query.season, 10)
-    const candidate = Number.isInteger(saisonDemandee) ? saisonDemandee : saisonHistorique
-    saison = saisons.some((element) => element.saison === candidate)
-      ? candidate
-      : (saisons[0]?.saison ?? 1)
-
-    try {
-      const donnees = await episodes(id, saison)
-      const bloc = (donnees?.seasons ?? []).find((element) => Number(element.season) === saison)
-      listeEpisodes = (bloc?.episodes ?? []).filter((element) => {
-        const numero = Number(element?.episode)
-        return Number.isInteger(numero) && numero > 0
-      })
-    } catch (erreur) {
-      console.warn(`[CineFlow] Épisodes indisponibles pour ${id} saison ${saison} : ${erreur instanceof Error ? erreur.message : String(erreur)}`)
-    }
-
-    const episodeHistorique = saisonHistorique === saison ? (Number(historique?.episode) || 0) : 0
-    const episodeDemande = Number.parseInt(req.query.episode, 10)
-    const candidat = Number.isInteger(episodeDemande) ? episodeDemande : episodeHistorique
-    episode = listeEpisodes.some((element) => Number(element.episode) === candidat)
-      ? candidat
-      : (Number(listeEpisodes[0]?.episode) || 1)
-
-    episodeChoisi = listeEpisodes.find((element) => Number(element.episode) === episode) ?? null
-  }
+  const memeEpisode = !estSerie
+    || (Number(historique?.season) === Number(saison) && Number(historique?.episode) === Number(episode))
+  const dejaVu = historique && historique.duration > 0 && historique.progress / historique.duration < 0.95
+  const reprise = dejaVu && memeEpisode && historique.progress > 10
+    ? Math.floor(historique.progress)
+    : 0
 
   const [dispo, avisHtml] = await Promise.all([
     disponibilite(type, id, estSerie ? saison : null, estSerie ? episode : null).catch(() => null),
     blocAvis(type, id),
   ])
 
+  const disponible = dispo?.available === true
+  const donneesLecteurPanneau = estSerie
+    ? await donneesPanneau({
+      media,
+      saisonAffichee: saison,
+      actifSaison: saison,
+      actifEpisode: episode,
+      langueDemandee: req.query.lang,
+      dispo,
+    })
+    : null
+  const langue = donneesLecteurPanneau?.langue ?? ""
+  const source = sourceLecteur(type, id, saison, episode)
+  const sourceFinale = source.avecReprise(langue, reprise)
+
+  const iframe = disponible
+    ? `<iframe data-lecteur data-media="${e(type)}" data-id="${id}"
+        ${estSerie ? `data-season="${saison}" data-episode="${episode}" data-lang="${e(langue)}"` : ""}
+        data-reprise="${reprise}" data-src-base="${e(source.base)}" src="${e(sourceFinale)}"
+        allow="autoplay; fullscreen; picture-in-picture" allowfullscreen
+        title="Lecteur HeiwaStream pour ${e(estSerie ? `${media.titre} ${codeEpisode(saison, episode)}` : media.titre)}"></iframe>`
+    : blocIndisponible({
+      type,
+      id,
+      saison,
+      episode,
+      estSerie,
+      verificationImpossible: !dispo,
+    })
+
+  const panneau = estSerie
+    ? `<aside class="panneau" aria-label="Épisodes et langues de la série">
+        <div class="panneau-contenu" data-panneau-contenu>${htmlPanneau(donneesLecteurPanneau, media)}</div>
+      </aside>`
+    : ""
+
   const favori = req.user ? db.estFavori(req.user.id, type, id) : false
   const dansListe = req.user ? db.estDansListe(req.user.id, type, id) : false
+  const etats = etatsUtilisateur(req.user)
+  const similaires = await similairesDisponibles(media)
 
-  const memeEpisode = !estSerie
-    || (Number(historique?.season) === saison && Number(historique?.episode) === episode)
-  const dejaVu = historique && historique.duration > 0 && historique.progress / historique.duration < 0.95
-  const reprise = dejaVu && memeEpisode && historique.progress > 10 ? Math.floor(historique.progress) : 0
-
-  const site = encodeURIComponent(process.env.HEIWA_SITE ?? "")
-  const source = estSerie
-    ? `https://heiwastream.fr/embed/tv/${id}/${String(saison).padStart(2, "0")}/${String(episode).padStart(2, "0")}?site=${site}&report=1${reprise ? `&t=${reprise}` : ""}`
-    : `https://heiwastream.fr/embed/movie/${id}?site=${site}&report=1${reprise ? `&t=${reprise}` : ""}`
-
-  const titreLecture = estSerie ? `${media.titre} — S${saison} E${episode}` : media.titre
-  const lecteur = dispo?.available
-    ? `<iframe data-lecteur data-media="${type}" data-id="${id}"
-        ${estSerie ? `data-season="${saison}" data-episode="${episode}"` : ""} data-reprise="${reprise}" src="${e(source)}"
-        allow="autoplay; fullscreen; picture-in-picture" allowfullscreen
-        title="Lecteur HeiwaStream pour ${e(titreLecture)}"></iframe>`
-    : `<p class="vide">${dispo ? `Ce ${estSerie ? "épisode" : "film"} n'est pas encore disponible chez HeiwaStream.` : "Impossible de vérifier la disponibilité pour le moment."}</p>`
-
-  const langues = (Array.isArray(dispo?.languages) ? dispo.languages : [])
-    .map((langue) => `<span class="chip">${e(langue)}</span>`).join("")
-  const qualite = dispo?.quality ? `<span class="chip">${e(dispo.quality)}</span>` : ""
   const fond = media.backdrop_path ? ` style="--bg:url(${e(`${IMG}original${media.backdrop_path}`)})"` : ""
   const afficheVue = media.poster_path ? `${IMG}w342${media.poster_path}` : ""
   const kindVue = media.kind ?? (estSerie ? "series" : "movie")
-
-  const infosEpisode = estSerie && episodeChoisi
-    ? `<p class="episode-info">
-        S${saison} E${episode}${episodeChoisi.title ? ` · ${e(episodeChoisi.title)}` : ""}
-        ${episodeChoisi.air_date ? ` · ${e(dateLisible(episodeChoisi.air_date))}` : ""}
-      </p>`
-    : ""
-
-  const indexEpisode = listeEpisodes.findIndex((element) => Number(element.episode) === episode)
-  const precedent = indexEpisode > 0 ? listeEpisodes[indexEpisode - 1] : null
-  const suivant = indexEpisode >= 0 && indexEpisode < listeEpisodes.length - 1
-    ? listeEpisodes[indexEpisode + 1]
-    : null
-
-  const navEpisodes = estSerie && (precedent || suivant)
-    ? `<nav class="nav-episodes" aria-label="Navigation entre les épisodes">
-        ${precedent ? `<a class="btn-ligne" href="/titre/tv/${id}?season=${saison}&episode=${precedent.episode}">‹ Épisode ${precedent.episode}</a>` : ""}
-        ${suivant ? `<a class="btn-ligne" href="/titre/tv/${id}?season=${saison}&episode=${suivant.episode}">Épisode ${suivant.episode} ›</a>` : ""}
-      </nav>`
-    : ""
+  const titrePage = estSerie ? `${media.titre} — ${codeEpisode(saison, episode)}` : media.titre
 
   res.send(page({
-    titre: estSerie ? `${media.titre} — S${saison} E${episode}` : media.titre,
+    titre: titrePage,
     user: req.user,
     chemin: req.originalUrl,
-    nomPage: "titre",
+    nomPage: "lecture",
     description: media.overview?.slice(0, 160),
-    corps: `<main class="film"${fond} data-vue-type="${e(type)}" data-vue-id="${id}"
+    scripts: ["/app.js", "/player.js"],
+    corps: `<main class="lecture"${fond} data-lecture data-type="${e(type)}" data-id="${id}"
+      ${estSerie ? `data-saison="${saison}" data-episode="${episode}"` : ""}
+      data-titre="${e(media.titre)}" data-reprise-auto="${repriseAuto ? 1 : 0}"
+      data-vue-type="${e(type)}" data-vue-id="${id}"
       data-vue-titre="${e(media.titre)}" data-vue-affiche="${e(afficheVue)}" data-vue-kind="${e(kindVue)}">
-      ${estSerie ? formulaireEpisodes(id, saisons, saison, listeEpisodes, episode) : ""}
-      <div class="lecteur">${lecteur}</div>
-      ${infosEpisode}
-      ${navEpisodes}
-      <div class="film-infos">
-        <div>
-          <h1>${e(media.titre)}</h1>
-          <div class="chips">${chipsInfos(media)}${langues}${qualite}</div>
-          ${boutonsMedia(type, id, favori, dansListe)}
+      <section class="lecteur-zone" aria-label="Lecteur vidéo">
+        <div class="lecteur-cadre">
+          ${barreLecteur(media, { estSerie, saison, episode })}
+          <div class="lecteur-corps${estSerie ? " avec-panneau" : ""}">
+            <div class="lecteur-video">${iframe}</div>
+            ${panneau}
+          </div>
+          <div class="suite-lecture" data-suite hidden role="status" aria-live="polite">
+            <span data-suite-texte>Épisode suivant dans 5 s…</span>
+            <button type="button" class="btn-ligne" data-suite-maintenant>Lire maintenant</button>
+            <button type="button" class="btn-ligne" data-suite-annuler>Annuler</button>
+          </div>
         </div>
-        <p class="resume">${e(media.overview)}</p>
-      </div>
-      ${reprise ? `<p class="reprise-info">Reprise à ${Math.floor(reprise / 60)} min ${String(reprise % 60).padStart(2, "0")} s${estSerie ? ` (S${saison} E${episode})` : ""}.</p>` : ""}
+        ${repriseLisible(reprise, saison, episode, estSerie)}
+      </section>
+
+      ${blocInfosMedia(media, {
+        type,
+        estSerie,
+        saisonActive: saison,
+        favori,
+        dansListe,
+        similaires,
+        etats,
+      })}
       ${avisHtml}
       ${formulaireAvis(type, id, req.user, req.originalUrl)}
+      ${modaleBandeAnnonce(media.bandeAnnonce)}
     </main>`,
   }))
+}
+
+pagesRouter.get("/film/:id", async (req, res, next) => {
+  const id = entierPositif(req.params.id)
+  if (!id) return introuvable(req, res)
+  try {
+    await rendreLecture(req, res, next, { type: "movie", id })
+  } catch (erreur) {
+    next(erreur)
+  }
 })
 
-// Anciennes adresses : conservées pour les liens déjà partagés.
-pagesRouter.get("/film/:id", (req, res) => {
-  const query = new URLSearchParams(req.query).toString()
-  res.redirect(301, `/titre/movie/${encodeURIComponent(req.params.id)}${query ? `?${query}` : ""}`)
+// Le panneau est déclaré avant la route générique : `panneau` ne doit pas être
+// interprété comme un numéro d'épisode.
+pagesRouter.get("/serie/:id/:saison/panneau", async (req, res, next) => {
+  const id = entierPositif(req.params.id)
+  const saison = entierPositif(req.params.saison)
+  if (!id || !saison) return res.status(404).json({ erreur: "Série introuvable." })
+
+  try {
+    const media = await fiche("tv", id)
+    const actifSaison = entierPositif(req.query.actifSaison) ?? saison
+    const actifEpisode = entierPositif(req.query.actifEpisode) ?? 0
+    const donnees = await donneesPanneau({
+      media,
+      saisonAffichee: saison,
+      actifSaison,
+      actifEpisode,
+      langueDemandee: req.query.lang,
+    })
+
+    res.set("Cache-Control", "no-store")
+    return res.json({
+      html: htmlPanneau(donnees, media),
+      saison: donnees.affichee,
+      actifSaison: donnees.actifSaison,
+      actifEpisode: donnees.actifEpisode,
+      langue: donnees.langue,
+    })
+  } catch (erreur) {
+    if (erreur?.status === 404) return res.status(404).json({ erreur: "Série introuvable." })
+    return next(erreur)
+  }
 })
 
-pagesRouter.get("/serie/:id", (req, res) => {
-  const query = new URLSearchParams(req.query).toString()
-  res.redirect(301, `/titre/tv/${encodeURIComponent(req.params.id)}${query ? `?${query}` : ""}`)
+pagesRouter.get("/serie/:id/:saison/:episode", async (req, res, next) => {
+  const id = entierPositif(req.params.id)
+  const saison = entierPositif(req.params.saison)
+  const episode = entierPositif(req.params.episode)
+  if (!id || !saison || !episode) return introuvable(req, res)
+
+  try {
+    await rendreLecture(req, res, next, {
+      type: "tv",
+      id,
+      saison,
+      episode,
+      repriseAuto: req.query.reprise === "1",
+    })
+  } catch (erreur) {
+    next(erreur)
+  }
+})
+
+pagesRouter.get("/serie/:id/:saison", async (req, res, next) => {
+  const id = entierPositif(req.params.id)
+  const saison = entierPositif(req.params.saison)
+  if (!id || !saison) return introuvable(req, res)
+
+  let episode = 1
+  try {
+    const donnees = await episodes(id, saison)
+    const bloc = (donnees?.seasons ?? []).find((element) => Number(element.season) === saison)
+    const premier = (bloc?.episodes ?? []).find((element) => entierPositif(element?.episode))
+    if (premier) episode = Number(premier.episode)
+  } catch (erreur) {
+    if (erreur?.status === 404) return introuvable(req, res, "Cette saison n'existe pas.")
+  }
+
+  const parametres = new URLSearchParams()
+  if (typeof req.query.lang === "string" && req.query.lang) parametres.set("lang", req.query.lang)
+  const suffixe = parametres.toString() ? `?${parametres.toString()}` : ""
+  res.redirect(302, `/serie/${id}/${saison}/${episode}${suffixe}`)
+})
+
+pagesRouter.get("/serie/:id", async (req, res, next) => {
+  const id = entierPositif(req.params.id)
+  if (!id) return introuvable(req, res)
+
+  // Un compte connecté reprend directement son dernier épisode.
+  if (req.user) {
+    const historique = db.progression(req.user.id, "tv", id)
+    if (entierPositif(historique?.season) && entierPositif(historique?.episode)) {
+      const parametres = new URLSearchParams()
+      if (typeof req.query.lang === "string" && req.query.lang) parametres.set("lang", req.query.lang)
+      const suffixe = parametres.toString() ? `?${parametres.toString()}` : ""
+      return res.redirect(302, `/serie/${id}/${historique.season}/${historique.episode}${suffixe}`)
+    }
+  }
+
+  let media
+  try {
+    media = await fiche("tv", id)
+  } catch (erreur) {
+    if (erreur?.status === 404) return introuvable(req, res)
+    return next(erreur)
+  }
+
+  const saisons = listeSaisons(media)
+    .filter((element) => Number(element.saison) > 0)
+    .sort((a, b) => Number(a.saison) - Number(b.saison))
+  const saison = Number(saisons[0]?.saison) || 1
+  let episode = 1
+  try {
+    const donnees = await episodes(id, saison)
+    const bloc = (donnees?.seasons ?? []).find((element) => Number(element.season) === saison)
+    const premier = (bloc?.episodes ?? []).find((element) => entierPositif(element?.episode))
+    if (premier) episode = Number(premier.episode)
+  } catch {
+    // Le premier épisode reste le point de départ : la page indiquera que
+    // l'épisode n'est pas encore disponible.
+  }
+
+  // `reprise=1` autorise player.js à remplacer cet épisode par le dernier
+  // épisode regardé dans le navigateur (visiteur non connecté).
+  res.redirect(302, `/serie/${id}/${saison}/${episode}?reprise=1`)
+})
+
+// Ancienne adresse : conservée pour les liens déjà partagés.
+pagesRouter.get("/titre/:type/:id", (req, res) => {
+  const type = req.params.type
+  const id = entierPositif(req.params.id)
+  if (!estTypeMedia(type) || !id) {
+    return res.status(404).send(pageErreur(
+      404,
+      "Titre introuvable",
+      "Ce titre n'existe pas.",
+      { user: req.user, chemin: req.originalUrl },
+    ))
+  }
+
+  const parametres = new URLSearchParams()
+  if (typeof req.query.lang === "string" && req.query.lang) parametres.set("lang", req.query.lang)
+  const suffixe = parametres.toString() ? `?${parametres.toString()}` : ""
+
+  if (type === "movie") {
+    return res.redirect(301, `/film/${id}${suffixe}`)
+  }
+
+  const saison = entierPositif(req.query.season)
+  const episode = entierPositif(req.query.episode)
+  const cible = saison && episode
+    ? `/serie/${id}/${saison}/${episode}`
+    : saison
+      ? `/serie/${id}/${saison}`
+      : `/serie/${id}`
+  return res.redirect(301, `${cible}${suffixe}`)
 })
 
 // --- Recherche --------------------------------------------------------------

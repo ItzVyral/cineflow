@@ -110,25 +110,135 @@ h2{font-size:20px;font-weight:700;margin:8px 5vw 14px}
 .grille{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:22px 16px;margin:18px 0 30px}
 .grille .carte{flex:none;width:auto}
 
-/* --- Page film ----------------------------------------------------------- */
-.film{padding:96px 5vw 50px;max-width:1100px;margin:0 auto;position:relative}
-.film::before{content:"";position:fixed;inset:0;z-index:-1;background:linear-gradient(#101012d9,#101012),var(--bg) center/cover;opacity:.9}
-.lecteur{margin-bottom:22px}
-.lecteur iframe{width:100%;aspect-ratio:16/9;border:0;border-radius:var(--r);background:#000;display:block}
-.resume{max-width:70ch;color:#d4d4da}
+/* --- Lecture : lecteur, panneau et fiche --------------------------------- */
+.lecture{position:relative;padding:92px 5vw 50px;max-width:1600px;margin:0 auto}
+.lecture::before{content:"";position:fixed;inset:0;z-index:-1;background:linear-gradient(#101012f2,#101012 55%,#101012),var(--bg) center top/cover no-repeat}
+.lecteur-zone{margin:0 0 28px}
+.lecteur-cadre{display:flex;flex-direction:column;background:#000;border:1px solid #ffffff14;border-radius:16px;overflow:hidden;max-height:calc(100vh - 100px)}
+.barre-lecteur{display:flex;align-items:center;gap:10px;min-height:46px;padding:7px 10px 7px 6px;background:#0d0d10;border-bottom:1px solid #ffffff14;flex:0 0 auto}
+.barre-retour,.barre-copier{border:1px solid transparent;background:none;border-radius:8px;padding:7px 10px;font-size:13px;font-weight:600;color:var(--doux);cursor:pointer;white-space:nowrap;transition:color .15s,background .15s,border-color .15s}
+.barre-retour:hover,.barre-copier:hover{color:#fff;background:#ffffff10}
+.barre-copier{border-color:#ffffff1f;margin-left:auto}
+.barre-titre{display:flex;align-items:baseline;gap:8px;min-width:0;margin:0;font-size:14px;overflow:hidden}
+.barre-titre b{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.barre-code{color:var(--doux);font-size:12px;font-weight:600;letter-spacing:.04em;white-space:nowrap}
+.lecteur-corps{display:grid;grid-template-columns:minmax(0,1fr);min-height:0;flex:1 1 auto}
+.lecteur-corps.avec-panneau{grid-template-columns:minmax(0,1fr) 360px}
+.lecteur-video{position:relative;background:#000;aspect-ratio:16/9;min-width:0}
+.lecteur-video iframe{display:block;width:100%;height:100%;border:0;background:#000}
+.lecteur-cadre :focus-visible{outline-offset:-2px}
+
+/* Le lecteur est indisponible : la demande remplace la vidéo. */
+.indisponible{display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;gap:4px;height:100%;padding:32px;background:radial-gradient(circle at 50% 30%,#1c1c22,#0a0a0c)}
+.indisponible p{margin:0;color:var(--doux);max-width:52ch}
+.indisponible .indisponible-titre{font-size:20px;font-weight:700;color:var(--texte)}
+.demande{display:flex;flex-wrap:wrap;justify-content:center;align-items:center;gap:10px;margin-top:16px}
+.demande .form-msg{flex-basis:100%;margin:0;text-align:center}
+.btn-demande{border:0;border-radius:var(--r);background:var(--rouge);color:#fff;font-weight:700;padding:11px 20px;cursor:pointer;transition:filter .15s,opacity .15s}
+.btn-demande:hover:not(:disabled){filter:brightness(1.12)}
+.btn-demande:disabled{opacity:.55;cursor:wait}
+.demande-note{font-size:12px;color:#7d7d86}
+
+/* Panneau des épisodes et des langues (séries). */
+.panneau{display:flex;min-width:0;overflow:hidden;background:#0f0f12;border-left:1px solid #ffffff14}
+.panneau-contenu{display:flex;flex-direction:column;width:100%;min-width:0;min-height:0}
+.panneau-entete{padding:16px 16px 12px;border-bottom:1px solid #ffffff10;flex:0 0 auto}
+.panneau-sur-titre{margin:0 0 4px;font-size:10px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#8b8b94}
+.panneau-titre{margin:0 0 5px;font-size:17px;font-weight:800;line-height:1.25;overflow-wrap:anywhere}
+.panneau-sous-titre{display:flex;align-items:center;gap:8px;flex-wrap:wrap;margin:0}
+.panneau-code{font-size:12px;font-weight:600;color:var(--doux)}
+.badge-sans-pub{background:#0f2e1e;border:1px solid #1f6b45;color:#b7f7d3;border-radius:99px;padding:1px 8px;font-size:10px;font-weight:700;white-space:nowrap}
+.panneau-onglets{display:flex;gap:4px;padding:10px 12px 0;flex:0 0 auto}
+.panneau-onglet{flex:1;border:0;border-bottom:2px solid transparent;background:none;color:var(--doux);padding:8px 4px;font-size:12px;font-weight:700;cursor:pointer;white-space:nowrap;transition:color .15s,border-color .15s}
+.panneau-onglet:hover{color:#fff}
+.panneau-onglet.on{color:#fff;border-bottom-color:var(--rouge)}
+.panneau-onglet-contenu{flex:1 1 auto;min-height:0;overflow-y:auto;scrollbar-width:thin;padding:10px 12px 14px}
+.panneau-onglet-contenu::-webkit-scrollbar{width:8px}
+.panneau-onglet-contenu::-webkit-scrollbar-thumb{background:#ffffff24;border-radius:99px}
+.panneau-saison{display:flex;align-items:center;justify-content:space-between;gap:8px;font-size:12px;color:var(--doux);padding:0 2px 10px}
+.panneau-saison select{background:#131316;border:1px solid #ffffff24;border-radius:8px;color:var(--texte);padding:5px 8px;font:inherit;font-size:12px;max-width:100%}
+.panneau-saison select:focus{outline:none;border-color:var(--rouge)}
+.episodes-liste{display:flex;flex-direction:column;gap:4px}
+.episode{display:grid;grid-template-columns:88px minmax(0,1fr) auto;align-items:center;gap:10px;width:100%;text-align:left;background:none;border:1px solid transparent;border-radius:10px;padding:6px;color:inherit;cursor:pointer;transition:background .15s,border-color .15s}
+.episode:hover{background:#ffffff0a}
+.episode.on{border-color:var(--rouge);background:#ff00330f}
+.episode img{display:block;width:88px;height:auto;aspect-ratio:16/9;object-fit:cover;border-radius:6px;background:#1c1c20}
+.episode-sans-image{display:grid;place-items:center;width:88px;aspect-ratio:16/9;border-radius:6px;background:#1c1c20;color:var(--doux);font-size:12px;font-weight:700}
+.episode-corps{display:flex;flex-direction:column;gap:2px;min-width:0}
+.episode-titre{font-size:12.5px;font-weight:700;line-height:1.3;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.episode-meta{font-size:11px;color:#8b8b94;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.episode-actif{font-size:10px;font-weight:700;color:#ff8095;white-space:nowrap}
+.langues-liste{display:flex;flex-direction:column;gap:8px}
+.langue{display:grid;grid-template-columns:1fr auto;gap:2px 10px;width:100%;text-align:left;background:#161619;border:1px solid #ffffff14;border-radius:10px;padding:10px 12px;color:inherit;cursor:pointer;transition:background .15s,border-color .15s}
+.langue:hover{border-color:#ffffff33}
+.langue.on{border-color:var(--rouge);background:#ff00330f}
+.langue-code{font-size:13px;font-weight:800;letter-spacing:.03em}
+.langue-desc{font-size:11px;color:#8b8b94}
+.langue-etat{grid-column:2;grid-row:1/3;align-self:center;font-size:10px;font-weight:700;color:var(--doux);white-space:nowrap}
+.langue.on .langue-etat{color:#ff8095}
+.panneau-vide{padding:8px 2px;font-size:13px;margin:0}
+.panneau-pied{flex:0 0 auto;padding:10px 12px 12px;border-top:1px solid #ffffff10;background:#0f0f12}
+.suivant{width:100%;padding:12px 14px;border:0;border-radius:12px;background:#fff;color:#111;font-weight:800;font-size:13px;cursor:pointer;transition:filter .15s,opacity .15s}
+.suivant:hover:not(:disabled){filter:brightness(.92)}
+.suivant:disabled{opacity:.35;cursor:not-allowed}
+.suite-lecture{display:flex;align-items:center;gap:12px;flex-wrap:wrap;padding:12px 16px;background:#161619;border-top:1px solid #ffffff14;font-size:14px}
+.suite-lecture[hidden]{display:none}
+.suite-lecture span{flex:1;min-width:160px;color:#d4d4da}
+.suite-lecture .btn-ligne{padding:7px 12px;font-size:13px;cursor:pointer;background:none}
+
+/* Fiche TMDB sous le lecteur. */
+.fiche{padding-top:4px}
+.fiche-principale{display:grid;grid-template-columns:220px minmax(0,1fr);gap:28px;align-items:start}
+.fiche-affiche{border-radius:14px;overflow:hidden;background:var(--carte);border:1px solid #ffffff14}
+.fiche-affiche img{display:block;width:100%;height:auto;aspect-ratio:2/3;object-fit:cover}
+.fiche-sans-affiche{display:grid;place-items:center;aspect-ratio:2/3;padding:16px;text-align:center;color:var(--doux);background:linear-gradient(135deg,#232329,#151518);font-weight:700}
+.fiche-texte{min-width:0}
+.fiche-texte h1{margin:0 0 6px}
+.titre-original{margin:0 0 12px;color:var(--doux);font-size:14px}
+.fiche .chips{margin:0 0 14px}
+.slogan{margin:0 0 12px;color:#d4d4da;font-style:italic}
+.resume{max-width:80ch;color:#d4d4da;margin:0 0 4px}
 .actions-film{display:flex;gap:10px;flex-wrap:wrap;margin:14px 0 4px}
 .actions-film .act-texte{width:auto;height:auto;border-radius:var(--r);padding:9px 14px;gap:8px;font-size:14px;font-weight:600;background:#ffffff0f;backdrop-filter:none}
 .actions-film .act-texte span{display:inline}
 .actions-film .act-texte[aria-pressed="true"].coeur{background:var(--rouge);border-color:var(--rouge)}
 .actions-film .act-texte[aria-pressed="true"].coeur svg{fill:currentColor}
 .reprise-info{color:var(--doux);font-size:13px;margin:12px 0 0}
-.choix-episode{display:flex;flex-wrap:wrap;align-items:flex-end;gap:10px;background:var(--carte);border:1px solid #ffffff14;border-radius:var(--r);padding:12px 14px;margin:0 0 18px}
-.choix-episode label{display:flex;flex-direction:column;gap:4px;font-size:12px;color:var(--doux)}
-.choix-episode select{background:#131316;border:1px solid #ffffff24;border-radius:8px;color:var(--texte);padding:8px 10px;font:inherit;min-width:130px;max-width:100%}
-.choix-episode select:focus{outline:none;border-color:var(--rouge)}
-.choix-episode .play{padding:9px 18px}
-.episode-info{color:var(--doux);font-size:14px;margin:0 0 14px}
-.nav-episodes{display:flex;flex-wrap:wrap;gap:10px;margin:0 0 18px}
+.btn-bande-annonce{cursor:pointer;background:#ffffff0f}
+.btn-bande-annonce:hover{background:#ffffff19}
+.equipe{display:flex;flex-direction:column;gap:6px;margin:16px 0 0;font-size:13px}
+.equipe div{display:flex;gap:8px}
+.equipe dt{flex:0 0 92px;color:var(--doux);font-weight:600}
+.equipe dd{margin:0;color:#d4d4da}
+.casting-rang{display:flex;gap:16px;overflow-x:auto;padding:0 0 18px;scrollbar-width:thin}
+.casting-rang::-webkit-scrollbar{height:8px}
+.casting-rang::-webkit-scrollbar-thumb{background:#ffffff24;border-radius:99px}
+.personne{flex:0 0 104px;text-align:center}
+.personne-photo{display:block;width:96px;height:96px;margin:0 auto 8px;border-radius:50%;overflow:hidden;background:var(--carte);border:1px solid #ffffff1f}
+.personne-photo img{display:block;width:100%;height:100%;object-fit:cover}
+.personne-sans-photo{display:grid;place-items:center;width:100%;height:100%;font-size:24px;font-weight:800;color:var(--doux);background:linear-gradient(135deg,#232329,#151518)}
+.personne-nom{margin:0;font-size:12.5px;font-weight:700;line-height:1.3}
+.personne-role{margin:1px 0 0;font-size:11px;color:#8b8b94;line-height:1.3}
+.saisons-grille{display:grid;grid-template-columns:repeat(auto-fill,minmax(140px,1fr));gap:14px;margin:0 0 30px;max-width:1000px}
+.saison-carte{display:flex;flex-direction:column;gap:3px;background:var(--carte);border:1px solid #ffffff14;border-radius:12px;padding:8px;transition:border-color .15s,background .15s}
+.saison-carte:hover{border-color:#ffffff3d;background:#222227}
+.saison-carte.on{border-color:var(--rouge)}
+.saison-carte img{display:block;width:100%;height:auto;aspect-ratio:2/3;object-fit:cover;border-radius:8px;background:#131316;margin-bottom:4px}
+.saison-sans-affiche{display:grid;place-items:center;width:100%;aspect-ratio:2/3;border-radius:8px;background:#131316;color:var(--doux);font-weight:800;margin-bottom:4px}
+.saison-nom{font-size:13px;font-weight:700}
+.saison-meta{font-size:11.5px;color:#8b8b94}
+
+/* Bande-annonce : modale accessible. */
+.modale{position:fixed;inset:0;z-index:100;display:grid;place-items:center;padding:20px}
+.modale[hidden]{display:none}
+.modale-fond{position:absolute;inset:0;background:#000c;backdrop-filter:blur(3px)}
+.modale-boite{position:relative;z-index:1;width:min(960px,100%);background:#0b0b0d;border:1px solid #ffffff1f;border-radius:16px;overflow:hidden;box-shadow:0 30px 80px #000c}
+.modale-fermer{position:absolute;top:8px;right:8px;z-index:2;display:grid;place-items:center;width:36px;height:36px;border-radius:50%;border:1px solid #ffffff33;background:#0a0a0acc;color:#fff;font-size:22px;line-height:1;cursor:pointer;transition:background .15s,border-color .15s}
+.modale-fermer:hover{background:var(--rouge);border-color:var(--rouge)}
+.modale-boite :focus-visible{outline-offset:-2px}
+.modale-video{aspect-ratio:16/9;background:#000}
+.modale-video iframe{display:block;width:100%;height:100%;border:0}
+body.modale-ouverte{overflow:hidden}
 
 /* --- Avis ---------------------------------------------------------------- */
 .avis-section{margin-top:34px}
@@ -204,12 +314,20 @@ a.compteur:hover{border-color:var(--rouge)}
 footer{padding:30px 5vw;color:var(--doux);font-size:12px}
 
 /* --- Responsive ---------------------------------------------------------- */
+@media(max-width:1240px){
+  .lecteur-corps.avec-panneau{grid-template-columns:minmax(0,1fr) 330px}
+}
 @media(max-width:1100px){
   header{flex-wrap:wrap;row-gap:10px}
   nav.pills{position:static;transform:none;order:3;width:100%;justify-content:center;overflow-x:auto}
   .page{padding-top:150px}
-  .film{padding-top:150px}
+  .lecture{padding-top:150px}
   .bandeau-succes{margin-top:110px}
+}
+@media(max-width:1020px){
+  .lecteur-corps.avec-panneau{grid-template-columns:minmax(0,1fr)}
+  .lecteur-cadre{max-height:none}
+  .panneau{border-left:0;border-top:1px solid #ffffff14;max-height:min(560px,70vh)}
 }
 @media(max-width:720px){
   header{display:grid;grid-template-columns:auto 1fr;grid-template-areas:"logo compte" "recherche recherche" "nav nav";align-items:center;row-gap:10px;padding:12px 14px}
@@ -224,8 +342,13 @@ footer{padding:30px 5vw;color:var(--doux);font-size:12px}
   .discord{padding:7px 12px;font-size:13px;max-width:calc(100vw - 110px)}
   .discord-texte{overflow:hidden;text-overflow:ellipsis}
   .page{padding:170px 16px 40px}
-  .film{padding:176px 16px 40px}
+  .lecture{padding:170px 14px 40px}
   .bandeau-succes{margin:140px 16px 0}
+  .lecteur-cadre{border-radius:12px}
+  .fiche-principale{grid-template-columns:150px minmax(0,1fr);gap:18px}
+  .equipe dt{flex-basis:76px}
+  .modale{padding:12px}
+  .modale-boite{border-radius:12px}
   .hero{height:62vh;min-height:400px}
   .rang{padding-left:16px;padding-right:16px;gap:12px}
   .carte{flex-basis:132px}
@@ -239,6 +362,24 @@ footer{padding:30px 5vw;color:var(--doux);font-size:12px}
   .avatar-geant{width:76px;height:76px}
   .profil-nameplate{padding:12px 14px}
   .profil-nameplate h1{font-size:clamp(22px,6vw,30px)}
+}
+@media(max-width:560px){
+  .fiche-principale{grid-template-columns:1fr;gap:16px}
+  .fiche-affiche{max-width:180px}
+  .barre-lecteur{gap:6px;padding:6px 8px 6px 4px}
+  .barre-retour,.barre-copier{padding:6px 8px;font-size:12px}
+  .barre-titre{font-size:13px}
+  .barre-code{font-size:11px}
+  .episode{grid-template-columns:76px minmax(0,1fr) auto;gap:8px}
+  .episode img,.episode-sans-image{width:76px}
+  .panneau-entete{padding:14px 14px 10px}
+  .panneau-onglet-contenu{padding:10px 10px 12px}
+  .casting-rang{gap:12px}
+  .personne{flex-basis:96px}
+  .personne-photo{width:88px;height:88px}
+  .saisons-grille{grid-template-columns:repeat(auto-fill,minmax(118px,1fr));gap:10px}
+  .suite-lecture{padding:10px 12px;gap:8px}
+  .suite-lecture span{flex-basis:100%}
 }
 @media(hover:none){
   .actions-carte{opacity:1;transform:none}

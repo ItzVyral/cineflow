@@ -1,6 +1,6 @@
 import express from "express"
 import * as db from "../db.js"
-import { ErreurHeiwa, publierAvis } from "../heiwa.js"
+import { ErreurHeiwa, demanderTitre, publierAvis } from "../heiwa.js"
 import { estTypeMedia } from "../media.js"
 
 export const apiRouter = express.Router()
@@ -16,8 +16,6 @@ function exigerConnexion(req, res, next) {
   }
   next()
 }
-
-apiRouter.use(exigerConnexion)
 
 /** Valide le couple `type` / `id` de l'URL et renvoie un identifiant sûr. */
 function lireMedia(req, res) {
@@ -38,7 +36,7 @@ function lireMedia(req, res) {
 
 // --- Favoris ----------------------------------------------------------------
 
-apiRouter.post("/favoris/:type/:id", (req, res) => {
+apiRouter.post("/favoris/:type/:id", exigerConnexion, (req, res) => {
   const media = lireMedia(req, res)
   if (!media) return
 
@@ -46,7 +44,7 @@ apiRouter.post("/favoris/:type/:id", (req, res) => {
   res.json({ favori: true, ...media })
 })
 
-apiRouter.delete("/favoris/:type/:id", (req, res) => {
+apiRouter.delete("/favoris/:type/:id", exigerConnexion, (req, res) => {
   const media = lireMedia(req, res)
   if (!media) return
 
@@ -56,7 +54,7 @@ apiRouter.delete("/favoris/:type/:id", (req, res) => {
 
 // --- Liste de lecture -------------------------------------------------------
 
-apiRouter.post("/liste/:type/:id", (req, res) => {
+apiRouter.post("/liste/:type/:id", exigerConnexion, (req, res) => {
   const media = lireMedia(req, res)
   if (!media) return
 
@@ -64,7 +62,7 @@ apiRouter.post("/liste/:type/:id", (req, res) => {
   res.json({ liste: true, ...media })
 })
 
-apiRouter.delete("/liste/:type/:id", (req, res) => {
+apiRouter.delete("/liste/:type/:id", exigerConnexion, (req, res) => {
   const media = lireMedia(req, res)
   if (!media) return
 
@@ -81,7 +79,7 @@ function entierBorne(valeur, max, defaut) {
   return Number.isInteger(nombre) && nombre >= 0 && nombre <= max ? nombre : null
 }
 
-apiRouter.put("/historique/:type/:id", (req, res) => {
+apiRouter.put("/historique/:type/:id", exigerConnexion, (req, res) => {
   const media = lireMedia(req, res)
   if (!media) return
 
@@ -112,7 +110,7 @@ apiRouter.put("/historique/:type/:id", (req, res) => {
 
 // --- Avis -------------------------------------------------------------------
 
-apiRouter.post("/avis/:type/:id", async (req, res) => {
+apiRouter.post("/avis/:type/:id", exigerConnexion, async (req, res) => {
   const media = lireMedia(req, res)
   if (!media) return
 
@@ -173,6 +171,172 @@ apiRouter.post("/avis/:type/:id", async (req, res) => {
 
     console.warn(`[CineFlow] Envoi d'avis refusé par HeiwaStream (${erreur.status}).`)
     return res.status(502).json({ erreur: "HeiwaStream n'a pas accepté l'avis. Réessaie plus tard." })
+  }
+})
+
+// --- Demandes de titres -----------------------------------------------------
+
+// La documentation HeiwaStream limite à 3 demandes par visiteur et par jour.
+// Le compteur local évite d'envoyer des requêtes inutiles ; HeiwaStream reste
+// l'autorité finale et renvoie 429 le cas échéant.
+const demandesParVisiteur = new Map()
+const MAX_DEMANDES_JOUR = 3
+
+function jourCourant() {
+  return new Date().toISOString().slice(0, 10)
+}
+
+function compterDemande(requester) {
+  const jour = jourCourant()
+  const garde = demandesParVisiteur.get(requester)
+  if (!garde || garde.jour !== jour) {
+    demandesParVisiteur.set(requester, { jour, nombre: 1 })
+    return
+  }
+  garde.nombre += 1
+}
+
+function demandesRestantes(requester) {
+  const garde = demandesParVisiteur.get(requester)
+  if (!garde || garde.jour !== jourCourant()) return MAX_DEMANDES_JOUR
+  return Math.max(0, MAX_DEMANDES_JOUR - garde.nombre)
+}
+
+function statutDemande(resultat) {
+  return resultat?.status ?? resultat?.statut ?? null
+}
+
+apiRouter.post("/demande", async (req, res) => {
+  const type = req.body?.type
+  if (!estTypeMedia(type)) {
+    return res.status(404).json({ erreur: "Titre introuvable." })
+  }
+
+  const id = Number(req.body?.id ?? req.body?.tmdb)
+  if (!Number.isSafeInteger(id) || id <= 0) {
+    return res.status(404).json({ erreur: "Titre introuvable." })
+  }
+
+  let season = null
+  let episode = null
+  if (type === "tv") {
+    season = Number(req.body?.season)
+    episode = Number(req.body?.episode)
+    if (!Number.isInteger(season) || season <= 0 || !Number.isInteger(episode) || episode <= 0) {
+      return res.status(400).json({ erreur: "Indique une saison et un épisode valides." })
+    }
+  }
+
+  const requester = String(req.requester ?? "")
+  if (!requester) {
+    return res.status(400).json({ erreur: "Visiteur non identifié. Recharge la page." })
+  }
+
+  if (demandesRestantes(requester) <= 0) {
+    return res.status(429).json({
+      erreur: "Tu as atteint la limite de 3 demandes par jour. Réessaie demain.",
+      statut: "limite_locale",
+    })
+  }
+
+  try {
+    const resultat = await demanderTitre({
+      type,
+      tmdb: id,
+      season,
+      episode,
+      requester,
+    })
+    const statut = statutDemande(resultat)
+
+    if (statut === "received" || statut === "joined") {
+      compterDemande(requester)
+      return res.json({
+        ok: true,
+        statut,
+        message: statut === "joined"
+          ? "Demande envoyée. D'autres personnes l'ont déjà demandée."
+          : "Demande envoyée.",
+      })
+    }
+
+    if (statut === "already_requested") {
+      return res.json({
+        ok: true,
+        statut,
+        message: "Ce titre a déjà été demandé.",
+      })
+    }
+
+    if (statut === "already_available") {
+      return res.json({
+        ok: true,
+        statut,
+        recharger: true,
+        message: "Ce titre est déjà disponible. La page va se recharger.",
+      })
+    }
+
+    if (statut === "not_released") {
+      return res.status(409).json({ erreur: "Pas encore sorti : la demande n'est pas encore possible.", statut })
+    }
+
+    if (statut === "requests_closed") {
+      return res.status(503).json({ erreur: "Les demandes sont momentanément fermées. Réessaie plus tard.", statut })
+    }
+
+    if (statut === "recently_refused") {
+      return res.status(409).json({ erreur: "Une demande pour ce titre a été refusée récemment.", statut })
+    }
+
+    if (statut === "not_requestable") {
+      return res.status(400).json({ erreur: "Ce titre ne peut pas être demandé.", statut })
+    }
+
+    if (statut === "requests_banned") {
+      return res.status(403).json({ erreur: "Les demandes sont bloquées pour ce visiteur.", statut })
+    }
+
+    if (statut === "not_found") {
+      return res.status(404).json({ erreur: "Titre introuvable chez HeiwaStream.", statut })
+    }
+
+    console.warn(`[CineFlow] Demande refusée par HeiwaStream : ${statut ?? "statut inconnu"}.`)
+    return res.status(502).json({ erreur: "HeiwaStream n'a pas accepté la demande. Réessaie plus tard." })
+  } catch (erreur) {
+    if (!(erreur instanceof ErreurHeiwa)) {
+      console.error("[CineFlow] Erreur inattendue lors d'une demande :", erreur)
+      return res.status(502).json({ erreur: "Impossible d'envoyer la demande pour le moment." })
+    }
+
+    const statut = statutDemande(erreur.corps)
+
+    if (erreur.status === 429) {
+      return res.status(429).json({
+        erreur: "La limite de demandes est atteinte pour aujourd'hui. Réessaie demain.",
+        statut: statut ?? "limite",
+      })
+    }
+
+    if (statut === "already_available") {
+      return res.json({
+        ok: true,
+        statut,
+        recharger: true,
+        message: "Ce titre est déjà disponible. La page va se recharger.",
+      })
+    }
+
+    if (statut === "not_released") {
+      return res.status(409).json({ erreur: "Pas encore sorti : la demande n'est pas encore possible.", statut })
+    }
+
+    if (statut === "requests_closed") {
+      return res.status(503).json({ erreur: "Les demandes sont momentanément fermées. Réessaie plus tard.", statut })
+    }
+
+    console.warn(`[CineFlow] Demande refusée par HeiwaStream (${erreur.status}).`)
+    return res.status(502).json({ erreur: "Impossible d'envoyer la demande pour le moment." })
   }
 })
 

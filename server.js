@@ -1,4 +1,5 @@
 import "dotenv/config"
+import crypto from "node:crypto"
 import path from "node:path"
 import { fileURLToPath } from "node:url"
 import express from "express"
@@ -6,7 +7,7 @@ import helmet from "helmet"
 import { rateLimit } from "express-rate-limit"
 import * as db from "./src/db.js"
 import { authRouter } from "./src/auth.js"
-import { middlewareSession } from "./src/session.js"
+import { lireCookie, middlewareSession } from "./src/session.js"
 import { apiRouter } from "./src/routes/api.js"
 import { pagesRouter } from "./src/routes/pages.js"
 import { pageErreur } from "./src/render.js"
@@ -23,13 +24,17 @@ app.use(helmet({
   contentSecurityPolicy: {
     directives: {
       defaultSrc: ["'self'"],
-      // Aucun script inline : tout le JS client est dans public/app.js.
+      // Aucun script inline : tout le JS client est dans public/app.js et public/player.js.
       scriptSrc: ["'self'"],
       scriptSrcAttr: ["'none'"],
       styleSrc: ["'self'", "'unsafe-inline'", "https://fonts.googleapis.com"],
       fontSrc: ["'self'", "https://fonts.gstatic.com"],
       imgSrc: ["'self'", "data:", "https://image.tmdb.org", "https://cdn.discordapp.com"],
-      frameSrc: ["https://heiwastream.fr"],
+      frameSrc: [
+        "https://heiwastream.fr",
+        "https://www.youtube-nocookie.com",
+        "https://www.youtube.com",
+      ],
       connectSrc: ["'self'"],
       mediaSrc: ["'self'", "https://heiwastream.fr"],
       formAction: ["'self'"],
@@ -63,6 +68,27 @@ app.use(express.static(path.join(racine, "public"), {
 }))
 
 app.use(middlewareSession(db))
+
+// Identifiant anonyme et stable du visiteur pour les demandes de titres.
+// Cookie httpOnly : le navigateur ne peut pas le lire, et il ne contient
+// aucune donnée personnelle.
+const NOM_DEMANDEUR = "cineflow_requester"
+
+app.use((req, res, next) => {
+  let demandeur = lireCookie(req, NOM_DEMANDEUR)
+  if (!demandeur || !/^[a-f0-9]{32,64}$/.test(demandeur)) {
+    demandeur = crypto.randomBytes(24).toString("hex")
+    res.cookie(NOM_DEMANDEUR, demandeur, {
+      httpOnly: true,
+      sameSite: "lax",
+      secure: enProduction,
+      maxAge: 365 * 24 * 60 * 60 * 1000,
+      path: "/",
+    })
+  }
+  req.requester = demandeur
+  next()
+})
 
 // Les pages contiennent le pseudo et l'état de connexion : jamais de cache partagé.
 app.use((req, res, next) => {
