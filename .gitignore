@@ -1,0 +1,21 @@
+# Dépendances
+node_modules/
+
+# Secrets locaux
+.env
+.env.*
+!.env.example
+
+# Données locales (SQLite + WAL)
+data/
+*.db
+*.db-shm
+*.db-wal
+*.sqlite
+*.sqlite3
+
+# Logs et divers
+npm-debug.log*
+.DS_Store
+coverage/
+dist/

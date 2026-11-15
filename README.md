@@ -1,0 +1,269 @@
+# CineFlow
+
+CineFlow est une interface de streaming de films, de séries et d'animés
+construite autour de l'API HeiwaStream et des métadonnées TMDB. La recherche,
+le catalogue, la disponibilité, les épisodes et les avis viennent de
+HeiwaStream ; les fiches, affiches et logos viennent de TMDB (avec l'API
+HeiwaStream en secours).
+
+Le site fonctionne sans framework front : pages rendues côté serveur avec
+Express, JavaScript vanilla côté client, SQLite pour les comptes et les données
+personnelles.
+
+## Fonctionnalités
+
+- **Recherche multi-type** : la recherche passe par `GET /find/{titre}` de
+  HeiwaStream et couvre les films, les séries et les animés. Filtres
+  « Tous / Films / Séries / Animés ». L'identifiant TMDB renvoyé par l'API (et
+  présent dans les URL du lecteur) sert à charger les affiches et les fiches.
+- **Catalogue** : nouveautés mixtes sur l'accueil, catalogue paginé par type
+  (`/catalogue?type=movie|tv|anime`, 20 pages).
+- **Séries et animés** : sélection de la saison et de l'épisode, disponibilité
+  et langues par épisode, lecteur `/embed/tv/{id}/{saison}/{épisode}`, épisode
+  précédent / suivant.
+- **Comptes Discord** : connexion OAuth2 avec le seul scope `identify`. Seuls
+  l'identifiant Discord, le pseudo, l'avatar, la décoration d'avatar et la
+  nameplate sont enregistrés. Aucun token Discord n'est conservé. La décoration
+  choisie sur Discord est affichée autour de la photo de profil (en-tête et
+  profil), et la nameplate sert de bannière derrière le pseudo sur `/profil`.
+- **Favoris et liste de lecture** : cœur et bouton « + » sur chaque affiche et
+  sur la page d'un titre, sans rechargement. Les films et les séries sont
+  distingués par leur type. Pages dédiées `/favoris` et `/liste`.
+- **Reprise de lecture** : la progression réelle du lecteur HeiwaStream est
+  enregistrée (événements `time`, `ended`) avec la saison et l'épisode, puis
+  reprise automatique via `t=` et `seek`. Une rangée « Continuer de regarder »
+  apparaît sur l'accueil.
+- **Récemment vus** : une rangée sur l'accueil liste les derniers titres
+  consultés. Elle est stockée en SQLite pour un compte connecté (sur tous ses
+  appareils) et dans `localStorage` pour un visiteur non connecté.
+- **Avis** : consultation des avis HeiwaStream et formulaire de note (1 à 5)
+  avec commentaire et spoiler, pour les films comme pour les séries. Le cache
+  est invalidé après envoi.
+- **Profil** : avatar, nameplate Discord derrière le pseudo, compteurs et
+  suppression définitive du compte et de toutes ses données, avec confirmation.
+
+## Prérequis
+
+- **Node.js 22 ou plus** (nécessaire pour `better-sqlite3` 13).
+- Une clé API HeiwaStream et l'identifiant public du site (`pk_…`).
+- Une clé API TMDB (v3), recommandée pour les affiches, les notes et les
+  saisons. Sans elle, CineFlow bascule sur les fiches `GET /title/{type}/{id}`
+  de HeiwaStream (moins complètes).
+- Une application Discord (facultatif pour consulter le site, nécessaire pour
+  les comptes).
+
+## Installation
+
+```bash
+npm install
+cp .env.example .env
+```
+
+Renseigne ensuite le `.env` (voir la section suivante), puis lance :
+
+```bash
+npm start
+```
+
+Le site est disponible sur <http://localhost:3000>. La base SQLite est créée
+automatiquement dans `data/cineflow.db` au premier démarrage, avec ses
+migrations.
+
+## Configuration Discord
+
+1. Ouvre <https://discord.com/developers/applications> et crée une
+   **New Application**.
+2. Dans **OAuth2**, copie le **Client ID** et génère un **Client Secret**.
+3. Ajoute une URL de redirection autorisée :
+   `http://localhost:3000/auth/discord/callback`
+   (ou l'URL publique exacte du site en production).
+4. Renseigne le `.env` :
+
+```dotenv
+DISCORD_CLIENT_ID=…
+DISCORD_CLIENT_SECRET=…
+DISCORD_REDIRECT_URI=http://localhost:3000/auth/discord/callback
+SESSION_SECRET=…
+```
+
+Aucun bot Discord n'est nécessaire : le scope demandé est uniquement
+`identify`. Le secret Discord ne doit jamais être exposé côté navigateur.
+
+Génère `SESSION_SECRET` avec :
+
+```bash
+node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
+```
+
+## Variables d'environnement
+
+| Variable | Rôle |
+| --- | --- |
+| `PORT` | Port HTTP (défaut `3000`). |
+| `NODE_ENV` | `production` active les cookies `Secure` et le cache des fichiers statiques. |
+| `TRUST_PROXY` | `1` derrière un reverse proxy de confiance (HTTPS, IP cliente réelle). |
+| `DATA_DIR` | Dossier de la base SQLite (défaut `data`). |
+| `HEIWA_CLE` | Clé privée de l'API HeiwaStream. Ne jamais la diffuser. |
+| `HEIWA_SITE` | Identifiant public du site (`pk_…`) utilisé par le lecteur. |
+| `TMDB_KEY` | Clé API TMDB v3 (recommandée : affiches, notes, liste des saisons). |
+| `DISCORD_CLIENT_ID` | Client ID de l'application Discord. |
+| `DISCORD_CLIENT_SECRET` | Client Secret de l'application Discord. |
+| `DISCORD_REDIRECT_URI` | URL de retour OAuth2, identique à celle déclarée dans Discord. |
+| `SESSION_SECRET` | Secret HMAC des cookies de session, obligatoire en production. |
+
+`.env` est ignoré par Git. `.env.example` ne contient que les noms des
+variables, jamais de valeur réelle.
+
+## Structure
+
+```text
+server.js               # application Express, sécurité, montage des routes
+src/
+├── auth.js             # OAuth2 Discord, state signé, déconnexion
+├── db.js               # SQLite, migrations et requêtes préparées
+├── heiwa.js            # client HeiwaStream, TMDB et cache mémoire
+├── media.js            # types (movie/tv), filtres (anime), libellés de badge
+├── nameplate.js        # validation des assets/palettes et URL CDN Discord
+├── render.js           # gabarit HTML, cartes, boutons, pagination, nameplate
+├── session.js          # cookie de session signé HMAC
+└── routes/
+    ├── pages.js        # accueil, titre (film/série), recherche, catalogue, favoris, profil
+    └── api.js          # favoris, liste, historique, avis (JSON)
+public/
+├── app.js              # actions client (favoris, avis, reprise, menus)
+├── style.css           # design sombre, responsive
+├── logo.svg
+└── icone.svg
+.well-known/
+└── heiwastream.txt     # vérification du domaine, servie telle quelle
+```
+
+## Routes
+
+| Route | Contenu |
+| --- | --- |
+| `/` | Nouveautés mixtes, « Continuer de regarder », recherche. |
+| `/titre/:type/:id` | Fiche et lecteur. `type` = `movie` ou `tv`. Une série accepte `?season=N&episode=N`. |
+| `/film/:id`, `/serie/:id` | Anciennes adresses, redirigées en 301 vers `/titre/…`. |
+| `/recherche?q=…&type=tous\|movie\|tv\|anime` | Recherche HeiwaStream filtrée. |
+| `/catalogue?type=movie\|tv\|anime&page=N` | Catalogue paginé (20 pages). |
+| `/favoris`, `/liste`, `/profil` | Données personnelles (connexion Discord requise). |
+| `/api/favoris\|liste\|historique\|avis/:type/:id` | JSON, session obligatoire. |
+
+## Données et sécurité
+
+- Base SQLite : `users`, `favorites`, `watchlist`, `history`,
+  `recently_viewed`. Les clés étrangères en cascade suppriment toutes les
+  données d'un compte.
+- Un même identifiant TMDB pouvant désigner un film et une série, `favorites`,
+  `watchlist` et `history` ont pour clé `(user_id, media_type, tmdb_id)`.
+  `history` stocke en plus `season` et `episode` pour la reprise d'une série.
+- Migrations versionnées par `PRAGMA user_version` : la migration 2 ajoute
+  `media_type` (et `season`/`episode`) en conservant les données existantes,
+  reprises en `movie` ; la migration 3 ajoute `users.avatar_decoration` (asset
+  du preset Discord, `NULL` si absent) ; la migration 4 ajoute
+  `users.nameplate_asset` et `users.nameplate_palette` ; la migration 5 ajoute
+  `recently_viewed` (30 dernières consultations par compte).
+- Toutes les requêtes SQL sont préparées ; aucune valeur n'est concaténée.
+- Tout contenu dynamique est échappé avec `e()` avant rendu HTML.
+- Session : cookie `httpOnly`, `SameSite=Lax`, `Secure` en production, signé en
+  HMAC-SHA256 et valable 30 jours. Le cookie ne contient qu'un identifiant
+  utilisateur et une date d'expiration.
+- OAuth2 : `state` aléatoire signé et expirant après 10 minutes, retour limité
+  aux chemins internes (pas de redirection ouverte).
+- Les routes `/auth` et `/api` sont limitées en débit ; les API renvoient du
+  JSON `401`, `404` et `429`.
+- CSP restrictive : iframe autorisée uniquement pour `heiwastream.fr`, images
+  pour `image.tmdb.org` et `cdn.discordapp.com`, polices Google.
+- Les secrets restent dans `.env` et les tokens Discord ne sont jamais stockés
+  ni journalisés.
+
+## Limites connues
+
+- **Numérotation des épisodes** : CineFlow suit celle de HeiwaStream, pas celle
+  de TMDB. Pour certains animés, elle est absolue : la saison 2 de Naruto
+  commence à l'épisode 53, et `?season=2&episode=3` retombe donc sur le premier
+  épisode disponible de la saison.
+- **Recherche** : `GET /find` répond 505 quand l'espace est encodé `%20`. Le
+  client encode les espaces en `+`, comme attendu par l'API.
+- **Auteur des avis** : l'API HeiwaStream ne permet pas de choisir l'auteur.
+  Les avis envoyés depuis un site partenaire sont affichés « Anonyme ». Le
+  formulaire l'indique et un identifiant stable (`discord-<id>`) est transmis
+  pour respecter la règle « un avis par visiteur et par titre ».
+- **Progression** : elle dépend des événements du lecteur. Quand la vidéo est
+  jouée par un hébergeur externe, HeiwaStream n'envoie que `ready` et
+  `episode` : aucune position n'est alors inventée.
+- **Avis en attente** : les commentaires sont relus par HeiwaStream. Une note
+  seule est publiée immédiatement, un commentaire peut rester en attente.
+- **Disponibilité** : un titre absent de HeiwaStream n'est pas proposé à la
+  lecture, même s'il existe sur TMDB. La disponibilité d'une série est vérifiée
+  épisode par épisode.
+- **Récemment vus (visiteur)** : la liste locale reste dans le navigateur
+  (`cineflow:recemment-vus`) et ne suit pas le compte. La vider ou changer de
+  navigateur la fait disparaître ; un compte connecté utilise SQLite.
+- **Décoration d'avatar et nameplate** : elles sont lues à la connexion Discord
+  et enregistrées avec le profil. Un changement sur Discord n'apparaît qu'après
+  une nouvelle connexion au site. Seuls les presets statiques de nameplate sont
+  rendus : un asset animé (WebM) est ignoré.
+- Le catalogue et les fiches dépendent de la disponibilité des API externes ;
+  les erreurs sont affichées sans exposer les détails techniques.
+
+## Tests d'intégration
+
+La suite `test/integration.mjs` vérifie les pages (film, série, animé,
+catalogue, recherche, redirections 301), la décoration d'avatar, la nameplate,
+les titres récemment vus et l'API typée (401, 403, 404, 400, favoris, liste,
+historique, reprise), ainsi que les migrations SQLite. Elle a besoin d'un serveur déjà lancé et d'un
+`SESSION_SECRET` identique :
+
+```bash
+SESSION_SECRET=test-secret PORT=3999 node server.js &
+SESSION_SECRET=test-secret BASE_URL=http://localhost:3999 npm run test:integration
+```
+
+Le script crée l'utilisateur `123456789012345678` dans la base de `DATA_DIR`,
+puis le supprime à la fin. Aucun avis n'est réellement envoyé à HeiwaStream.
+
+## Vérifications manuelles
+
+1. Accueil, `/titre/movie/550`, `/catalogue?type=movie`, `/catalogue?type=anime`,
+   `/recherche?q=matrix` et `/recherche?q=naruto&type=anime` s'affichent.
+2. `/titre/tv/46260` affiche le sélecteur de saison et d'épisode ; changer de
+   saison recharge la liste des épisodes et le lecteur.
+3. Connexion Discord, puis retour sur la page d'origine. La décoration
+   d'avatar choisie sur Discord entoure la photo de profil en haut à droite
+   (et sur `/profil`) ; la nameplate apparaît derrière le pseudo sur `/profil`.
+4. Cœur et « + » sur une carte film et sur une carte série : l'état persiste
+   après rechargement ; `/favoris` et `/liste` affichent les deux types.
+5. Visiter deux fiches, puis revenir à l'accueil : la rangée « Récemment vus »
+   affiche la dernière en premier, sans doublon. Déconnecté, elle reste
+   disponible après un rechargement grâce à `localStorage`.
+6. Lecture d'un film connecté, puis retour à l'accueil : « Continuer de
+   regarder » et la barre de progression apparaissent ; la page reprend à la
+   position enregistrée.
+7. Lecture d'un épisode, puis retour sur la fiche : la saison, l'épisode et la
+   reprise (`t=`) correspondent.
+8. Envoi d'un avis sur un film et sur une série, message de confirmation, puis
+   rechargement de la page.
+9. Déconnexion, puis suppression du compte depuis `/profil` en écrivant
+   `SUPPRIMER`.
+10. Vérifier les en-têtes CSP et les réponses JSON `401` / `404` / `429`.
+
+## Ce qui n'a pas pu être vérifié
+
+- La connexion Discord réelle : elle exige une application Discord valide
+  (`DISCORD_CLIENT_ID` / `DISCORD_CLIENT_SECRET`) et une URL de retour
+  déclarée.
+- L'envoi réel d'un avis à HeiwaStream : validé par le code et des réponses
+  simulées, volontairement pas testé sur leur service de production.
+- Le rendu visuel (badges, onglets, sélecteur d'épisode, décoration, nameplate
+  et rangée « Récemment vus ») n'a pas été contrôlé dans un navigateur ; les
+  pages ont été vérifiées en HTML et en CSS.
+- Le stockage `localStorage` des visiteurs n'a pas été exécuté dans un vrai
+  navigateur ; son rendu et sa validation sont couverts par le code client.
+
+## Crédits
+
+- Données et images : [TMDB](https://www.themoviedb.org/). Ce site utilise
+  l'API TMDB mais n'est ni approuvé ni certifié par TMDB.
+- Catalogue, disponibilité, lecteur et avis : HeiwaStream.
