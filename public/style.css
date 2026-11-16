@@ -111,7 +111,7 @@ h2{font-size:20px;font-weight:700;margin:8px 5vw 14px}
 .grille .carte{flex:none;width:auto}
 
 /* --- Lecture : lecteur, panneau et fiche --------------------------------- */
-.lecture{position:relative;padding:92px 5vw 50px;max-width:1600px;margin:0 auto}
+.lecture{position:relative;padding:80px 34px 50px;max-width:none;margin:0 auto}
 .lecture::before{content:"";position:fixed;inset:0;z-index:-1;background:linear-gradient(#101012f2,#101012 55%,#101012),var(--bg) center top/cover no-repeat}
 .lecteur-zone{margin:0 0 28px}
 .lecteur-cadre{display:flex;flex-direction:column;background:#000;border:1px solid #ffffff14;border-radius:16px;overflow:hidden;max-height:calc(100vh - 100px)}
@@ -122,9 +122,9 @@ h2{font-size:20px;font-weight:700;margin:8px 5vw 14px}
 .barre-titre{display:flex;align-items:baseline;gap:8px;min-width:0;margin:0;font-size:14px;overflow:hidden}
 .barre-titre b{font-weight:700;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .barre-code{color:var(--doux);font-size:12px;font-weight:600;letter-spacing:.04em;white-space:nowrap}
-.lecteur-corps{display:grid;grid-template-columns:minmax(0,1fr);min-height:0;flex:1 1 auto}
+.lecteur-corps{display:grid;grid-template-columns:minmax(0,1fr);min-height:0;flex:1 1 auto;height:clamp(420px,calc(100vh - 160px),960px)}
 .lecteur-corps.avec-panneau{grid-template-columns:minmax(0,1fr) 360px}
-.lecteur-video{position:relative;background:#000;aspect-ratio:16/9;min-width:0}
+.lecteur-video{position:relative;background:#000;min-width:0;min-height:0}
 .lecteur-video iframe{display:block;width:100%;height:100%;border:0;background:#000}
 .lecteur-cadre :focus-visible{outline-offset:-2px}
 
@@ -140,8 +140,8 @@ h2{font-size:20px;font-weight:700;margin:8px 5vw 14px}
 .demande-note{font-size:12px;color:#7d7d86}
 
 /* Panneau des épisodes et des langues (séries). */
-.panneau{display:flex;min-width:0;overflow:hidden;background:#0f0f12;border-left:1px solid #ffffff14}
-.panneau-contenu{display:flex;flex-direction:column;width:100%;min-width:0;min-height:0}
+.panneau{position:relative;display:flex;min-width:0;min-height:0;overflow:hidden;background:#0f0f12;border-left:1px solid #ffffff14}
+.panneau-contenu{position:absolute;inset:0;display:flex;flex-direction:column;width:100%;min-width:0;min-height:0}
 .panneau-entete{padding:16px 16px 12px;border-bottom:1px solid #ffffff10;flex:0 0 auto}
 .panneau-sur-titre{margin:0 0 4px;font-size:10px;font-weight:700;letter-spacing:.14em;text-transform:uppercase;color:#8b8b94}
 .panneau-titre{margin:0 0 5px;font-size:17px;font-weight:800;line-height:1.25;overflow-wrap:anywhere}
@@ -325,9 +325,11 @@ footer{padding:30px 5vw;color:var(--doux);font-size:12px}
   .bandeau-succes{margin-top:110px}
 }
 @media(max-width:1020px){
-  .lecteur-corps.avec-panneau{grid-template-columns:minmax(0,1fr)}
+  .lecteur-corps,.lecteur-corps.avec-panneau{grid-template-columns:minmax(0,1fr);height:auto}
+  .lecteur-video{aspect-ratio:16/9}
   .lecteur-cadre{max-height:none}
-  .panneau{border-left:0;border-top:1px solid #ffffff14;max-height:min(560px,70vh)}
+  .panneau{position:static;border-left:0;border-top:1px solid #ffffff14;height:min(560px,70vh)}
+  .panneau-contenu{position:static;height:100%}
 }
 @media(max-width:720px){
   header{display:grid;grid-template-columns:auto 1fr;grid-template-areas:"logo compte" "recherche recherche" "nav nav";align-items:center;row-gap:10px;padding:12px 14px}
@@ -344,7 +346,7 @@ footer{padding:30px 5vw;color:var(--doux);font-size:12px}
   .page{padding:170px 16px 40px}
   .lecture{padding:170px 14px 40px}
   .bandeau-succes{margin:140px 16px 0}
-  .lecteur-cadre{border-radius:12px}
+  .lecteur-cadre{border-radius:16px}
   .fiche-principale{grid-template-columns:150px minmax(0,1fr);gap:18px}
   .equipe dt{flex-basis:76px}
   .modale{padding:12px}

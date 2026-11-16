@@ -964,7 +964,7 @@ async function rendreLecture(req, res, next, {
   const fond = media.backdrop_path ? ` style="--bg:url(${e(`${IMG}original${media.backdrop_path}`)})"` : ""
   const afficheVue = media.poster_path ? `${IMG}w342${media.poster_path}` : ""
   const kindVue = media.kind ?? (estSerie ? "series" : "movie")
-  const titrePage = estSerie ? `${media.titre} — ${codeEpisode(saison, episode)}` : media.titre
+  const titrePage = estSerie ? `${media.titre} · ${codeEpisode(saison, episode)}` : media.titre
 
   res.send(page({
     titre: titrePage,

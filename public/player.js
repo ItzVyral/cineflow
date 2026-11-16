@@ -181,7 +181,7 @@
 
   function mettreAJourTitre() {
     document.title = estSerie
-      ? `${titre} — ${codeEpisode(saison, episode)} · CineFlow`
+      ? `${titre} · ${codeEpisode(saison, episode)} · CineFlow`
       : `${titre} · CineFlow`
   }
 
@@ -554,6 +554,13 @@
     if (focusAvantModale instanceof HTMLElement) focusAvantModale.focus()
     focusAvantModale = null
   }
+
+  // Tab peut sortir d'une iframe YouTube sans que le keydown remonte ici :
+  // on ramène le focus dans la modale dès qu'il atteint l'extérieur.
+  document.addEventListener("focusin", (event) => {
+    if (!modale || modale.hidden || modale.contains(event.target)) return
+    modale.querySelector(".modale-fermer")?.focus()
+  })
 
   document.addEventListener("keydown", (event) => {
     if (!modale || modale.hidden) return
