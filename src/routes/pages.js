@@ -25,15 +25,19 @@ import {
 import {
   avecNameplate,
   avatarAvecDecoration,
+  badgesDiscord,
+  banniereUrl,
   boutonsMedia,
   carte,
   chipsInfos,
+  couleurAccent,
   duree,
   e,
   etatVide,
   page,
   pageErreur,
   pagination,
+  tagServeur,
 } from "../render.js"
 import { effacerSession } from "../session.js"
 
@@ -816,8 +820,9 @@ pagesRouter.get("/", async (req, res, next) => {
         : `<h1>${e(media.titre)}</h1>`
 
       return `<article class="slide${index === 0 ? " on" : ""}"${styleFond}>
-        <div class="txt">${titre}
-        <div class="chips">${chipsInfos(media)}</div><p>${e(media.overview)}</p>
+        <span class="slide-flou" aria-hidden="true"></span>
+        <div class="txt"><div class="gl">${titre}</div>
+        <div class="gl"><div class="chips">${chipsInfos(media)}</div></div><div class="gl"><p>${e(media.overview)}</p></div>
         <a class="play" href="${media.type === "tv" ? `/serie/${media.id}` : `/film/${media.id}`}">▶ Lecture</a></div></article>`
     }).join("")
 
@@ -1268,6 +1273,30 @@ pagesRouter.get("/catalogue", async (req, res, next) => {
 
 async function pageListe(req, res, { actif, nomPage, titre, lignes, videTitre, videTexte }) {
   const etats = await etatsUtilisateur(req.user)
+  const icone = actif === "favoris"
+    ? '<path d="M12 20.5s-7.5-4.4-7.5-10.1A4.4 4.4 0 0 1 12 7.6a4.4 4.4 0 0 1 7.5 2.8c0 5.7-7.5 10.1-7.5 10.1z"/>'
+    : '<path d="M4 6h11M4 12h11M4 18h7M18 15v6M15 18h6"/>'
+
+  // Grand état vide : repères aux angles, affiches fantômes en fond.
+  const vide = ({ titreVide, texte, lien, libelle }) => `<section class="pl-vide">
+        <span class="pf-croix pf-croix-hg" aria-hidden="true"></span>
+        <span class="pf-croix pf-croix-hd" aria-hidden="true"></span>
+        <span class="pf-croix pf-croix-bg" aria-hidden="true"></span>
+        <span class="pf-croix pf-croix-bd" aria-hidden="true"></span>
+        <div class="pl-fantomes" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+        <span class="pl-vide-icone" aria-hidden="true"><svg viewBox="0 0 24 24">${icone}</svg></span>
+        <p class="pl-vide-titre">${e(titreVide)}</p>
+        <p class="pl-vide-texte">${e(texte)}</p>
+        <a class="play" href="${e(lien)}">${e(libelle)}</a>
+      </section>`
+
+  const entete = (compte) => `<div class="pl-tete">
+        <div>
+          <p class="pl-etiquette">( ${titre} )</p>
+          <h1 class="pl-titre">${titre}</h1>
+        </div>
+        ${compte == null ? "" : `<p class="pl-compte" data-pl-compte="${compte}">${compte} titre${compte > 1 ? "s" : ""}</p>`}
+      </div>`
 
   if (!req.user) {
     return res.send(page({
@@ -1276,10 +1305,10 @@ async function pageListe(req, res, { actif, nomPage, titre, lignes, videTitre, v
       user: null,
       chemin: req.originalUrl,
       nomPage,
-      corps: `<main class="page">
-        <h1 class="titre-page">${titre}</h1>
-        ${etatVide({
-          titre: "Connecte-toi pour retrouver tes titres",
+      corps: `<main class="page page-liste">
+        ${entete(null)}
+        ${vide({
+          titreVide: "Connecte-toi pour retrouver tes titres",
           texte: "Tes favoris et ta liste sont liés à ton compte Discord, sur tous tes appareils.",
           lien: `/auth/discord?retour=${encodeURIComponent(req.originalUrl)}`,
           libelle: "Se connecter avec Discord",
@@ -1302,14 +1331,14 @@ async function pageListe(req, res, { actif, nomPage, titre, lignes, videTitre, v
     user: req.user,
     chemin: req.originalUrl,
     nomPage,
-    corps: `<main class="page">
-      <h1 class="titre-page">${titre}</h1>
+    corps: `<main class="page page-liste">
+      ${entete(medias.length)}
       ${medias.length
         ? `<div class="grille">${medias.map((media) => carte(media, {
           favori: etats.favoris.has(cleMedia(media.type, media.id)),
           liste: etats.liste.has(cleMedia(media.type, media.id)),
         })).join("")}</div>`
-        : etatVide({ titre: videTitre, texte: videTexte, lien: "/", libelle: "Découvrir des titres" })}
+        : vide({ titreVide: videTitre, texte: videTexte, lien: "/catalogue", libelle: "Découvrir des titres" })}
     </main>`,
   }))
 }
@@ -1348,6 +1377,37 @@ pagesRouter.get("/liste", async (req, res, next) => {
 
 // --- Profil -----------------------------------------------------------------
 
+pagesRouter.get("/mentions-legales", (req, res) => {
+  res.send(page({
+    titre: "Mentions légales",
+    user: req.user,
+    chemin: req.originalUrl,
+    nomPage: "mentions",
+    description: "Mentions légales de CineFlow : éditeur, hébergement, données personnelles et crédits.",
+    corps: `<main class="page page-etroite page-legal">
+      <p class="pl-etiquette">( Informations )</p>
+      <h1 class="pl-titre">Mentions légales</h1>
+
+      <h2>Éditeur</h2>
+      <p>CineFlow est un projet personnel, non commercial, édité par ItzVyral. Le site ne vend rien, n'affiche aucune publicité et ne génère aucun revenu. Contact : via le serveur Discord ou le dépôt GitHub indiqués en bas de page.</p>
+
+      <h2>Hébergement</h2>
+      <p>Le site est hébergé par Render (Render Services, Inc., San Francisco, États-Unis). La base de données est hébergée par Supabase.</p>
+
+      <h2>Contenus</h2>
+      <p>CineFlow n'héberge aucune vidéo. Les fiches, affiches et images proviennent de TMDB. Le lecteur est fourni par un service tiers, intégré dans la page. Ce site utilise l'API TMDB mais n'est ni approuvé ni certifié par TMDB.</p>
+      <p>Pour signaler un contenu, utilise le drapeau de signalement du lecteur ou contacte-nous sur Discord.</p>
+
+      <h2>Données personnelles</h2>
+      <p>La connexion se fait avec Discord. CineFlow enregistre uniquement ton identifiant Discord, ton pseudo et les éléments publics de ton profil (avatar, décoration, bannière, badges), ainsi que tes favoris, ta liste, ta progression de lecture et tes titres récemment vus. Aucune adresse e-mail n'est collectée.</p>
+      <p>Tu peux supprimer ton compte et toutes ces données à tout moment depuis la page <a class="lien" href="/profil">Profil</a>.</p>
+
+      <h2>Cookies</h2>
+      <p>Le site utilise seulement des cookies nécessaires à son fonctionnement : la session de connexion et un identifiant technique anonyme pour limiter les abus. Aucun cookie publicitaire ni traceur tiers n'est déposé par CineFlow.</p>
+    </main>`,
+  }))
+})
+
 pagesRouter.get("/profil", async (req, res) => {
   if (!req.user) {
     return res.send(page({
@@ -1367,39 +1427,84 @@ pagesRouter.get("/profil", async (req, res) => {
     }))
   }
 
-  const comptes = await db.compteurs(req.user.id)
+  const [comptes, etats] = await Promise.all([db.compteurs(req.user.id), etatsUtilisateur(req.user)])
+  const recents = await blocRecemmentVus(req.user, etats).catch(() => "")
   const membreDepuis = dateFr(req.user.created_at)
-  const identite = `<h1>${e(req.user.username)}</h1>
-          ${membreDepuis ? `<p class="vide">Membre depuis le ${e(membreDepuis)}</p>` : ""}`
+  // Le grand pseudo est posé sur la nameplate Discord (animée) quand il y en a une.
+  const titre = avecNameplate(req.user, `<h1>${e(req.user.username)}</h1>`)
+  const banniere = banniereUrl(req.user)
+  const accent = couleurAccent(req.user)
+  const tag = tagServeur(req.user)
+  const badges = badgesDiscord(req.user)
+  const compte = [
+    req.user.handle ? `<span class="pf-handle">@${e(req.user.handle)}</span>` : "",
+    tag ? `<span class="pf-tag" title="Tag de serveur Discord">${tag.badge ? `<img src="${e(tag.badge)}" alt="" aria-hidden="true" width="14" height="14">` : ""}${e(tag.tag)}</span>` : "",
+  ].filter(Boolean).join('<span class="pf-point" aria-hidden="true">•</span>')
+
+  // Colonne de statistique : index, nombre (odomètre côté client), libellé qui roule.
+  const stat = (index, valeur, libelle, href) => {
+    const nombre = Number(valeur) || 0
+    const contenu = `<span class="pf-index">${index}</span>
+        <b class="pf-nombre" data-compte="${nombre}">${nombre}</b>
+        <span class="pf-libelle"><span class="roule"><span>${libelle}</span><span aria-hidden="true">${libelle}</span></span></span>`
+    return href
+      ? `<a class="pf-stat" href="${href}">${contenu}<span class="pf-fleche" aria-hidden="true"><i>→</i><i>→</i></span></a>`
+      : `<div class="pf-stat">${contenu}</div>`
+  }
 
   res.send(page({
     titre: "Profil",
     user: req.user,
     chemin: req.originalUrl,
     nomPage: "profil",
-    corps: `<main class="page page-etroite">
-      <section class="profil-entete">
-        ${avatarAvecDecoration(req.user, { taille: 96, cdn: 128, classe: "avatar-geant", alt: `Avatar de ${req.user.username}` })}
-        ${avecNameplate(req.user, identite)}
+    corps: `<main class="page page-profil">
+      <section class="pf" aria-label="Ton profil">
+        <span class="pf-croix pf-croix-hg" aria-hidden="true"></span>
+        <span class="pf-croix pf-croix-hd" aria-hidden="true"></span>
+        <span class="pf-croix pf-croix-bg" aria-hidden="true"></span>
+        <span class="pf-croix pf-croix-bd" aria-hidden="true"></span>
+        <div class="pf-banniere${banniere ? "" : " pf-banniere-vide"}"${accent ? ` style="--pf-accent:${e(accent)}"` : ""}>
+          ${banniere ? `<img src="${e(banniere)}" alt="" aria-hidden="true">` : ""}
+        </div>
+        <div class="pf-tete">
+          <div class="pf-avatar">
+            ${avatarAvecDecoration(req.user, { taille: 148, cdn: 256, classe: "avatar-geant", alt: `Avatar de ${req.user.username}` })}
+          </div>
+          <p class="pf-etiquette">
+            <span class="pf-masque"><span>( Profil )</span></span>
+            <span class="pf-masque"><span><svg viewBox="0 0 24 24" aria-hidden="true"><path d="M19.6 5.3A16.5 16.5 0 0 0 15.5 4l-.5 1a15 15 0 0 0-6 0l-.5-1a16.5 16.5 0 0 0-4.1 1.3C1.8 9.2 1.1 13 1.4 16.7A16.6 16.6 0 0 0 6.5 19.3l1-1.6a10.7 10.7 0 0 1-1.7-.8l.4-.3a11.8 11.8 0 0 0 11.6 0l.4.3a10.7 10.7 0 0 1-1.7.8l1 1.6a16.6 16.6 0 0 0 5.1-2.6c.4-4.3-.7-8-3-11.4zM8.7 14.5c-1 0-1.8-.9-1.8-2s.8-2 1.8-2 1.8.9 1.8 2-.8 2-1.8 2zm6.6 0c-1 0-1.8-.9-1.8-2s.8-2 1.8-2 1.8.9 1.8 2-.8 2-1.8 2z"/></svg>Connecté avec Discord</span></span>
+          </p>
+        </div>
+        <div class="pf-nom">
+          ${titre}
+          ${compte ? `<p class="pf-compte">${compte}</p>` : ""}
+          ${badges.length ? `<p class="pf-badges" aria-label="Badges Discord">${badges.map((b) => `<span class="pf-badge">${e(b)}</span>`).join("")}</p>` : ""}
+          ${membreDepuis ? `<p class="vide">Membre depuis le ${e(membreDepuis)}</p>` : ""}
+        </div>
+        <span class="pf-filet" aria-hidden="true"></span>
       </section>
 
-      <div class="compteurs">
-        <a class="compteur" href="/favoris"><b>${comptes.favoris}</b><span>favoris</span></a>
-        <a class="compteur" href="/liste"><b>${comptes.liste}</b><span>dans ma liste</span></a>
-        <span class="compteur"><b>${comptes.vus}</b><span>titres terminés</span></span>
+      <div class="pf-stats">
+        ${stat("01", comptes.favoris, "Favoris", "/favoris")}
+        ${stat("02", comptes.liste, "Ma liste", "/liste")}
+        ${stat("03", comptes.vus, "Titres terminés")}
       </div>
+
+      ${recents ? `<section class="profil-recents">${recents}</section>` : ""}
 
       <details class="zone-danger">
         <summary>Supprimer mon compte et mes données</summary>
-        <p>Cette action supprime définitivement ton compte, tes favoris, ta liste de lecture, ton historique et tes titres récemment vus. Aucune récupération n'est possible.</p>
-        <form method="post" action="/profil/supprimer" data-suppression>
-          <label class="champ">
-            <span>Écris <b>SUPPRIMER</b> pour confirmer</span>
-            <input type="text" name="confirmation" autocomplete="off" required pattern="SUPPRIMER">
-          </label>
-          <p class="form-msg" role="alert"></p>
-          <button class="danger" type="submit">Supprimer définitivement</button>
-        </form>
+        <div class="zone-danger-corps">
+          <p>Cette action supprime définitivement ton compte, tes favoris, ta liste de lecture, ton historique et tes titres récemment vus. Aucune récupération n'est possible.</p>
+          <form method="post" action="/profil/supprimer" data-suppression>
+            <label class="champ">
+              <span>Écris <b>SUPPRIMER</b> pour confirmer</span>
+              <input type="text" name="confirmation" autocomplete="off" required pattern="SUPPRIMER">
+            </label>
+            <p class="form-msg" role="alert"></p>
+            <button class="danger" type="submit">Supprimer définitivement</button>
+          </form>
+        </div>
       </details>
     </main>`,
   }))

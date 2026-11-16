@@ -85,12 +85,23 @@
     const grille = carte.closest(".grille")
     carte.remove()
 
+    const compte = document.querySelector("[data-pl-compte]")
+    if (compte && grille) {
+      const n = grille.querySelectorAll(".carte").length
+      compte.textContent = `${n} titre${n > 1 ? "s" : ""}`
+    }
+
     if (grille && !grille.querySelector(".carte")) {
-      const vide = document.createElement("div")
-      vide.className = "vide-boite"
-      vide.innerHTML = `<p class="vide-titre">C'est vide pour l'instant</p>
-        <p>Ajoute un film, une série ou un animé depuis son affiche.</p>
-        <a class="play" href="/">Découvrir des titres</a>`
+      const vide = document.createElement("section")
+      vide.className = "pl-vide"
+      vide.innerHTML = `<span class="pf-croix pf-croix-hg" aria-hidden="true"></span>
+        <span class="pf-croix pf-croix-hd" aria-hidden="true"></span>
+        <span class="pf-croix pf-croix-bg" aria-hidden="true"></span>
+        <span class="pf-croix pf-croix-bd" aria-hidden="true"></span>
+        <div class="pl-fantomes" aria-hidden="true"><i></i><i></i><i></i><i></i><i></i></div>
+        <p class="pl-vide-titre">C'est vide pour l'instant</p>
+        <p class="pl-vide-texte">Ajoute un film, une série ou un animé depuis son affiche.</p>
+        <a class="play" href="/catalogue">Découvrir des titres</a>`
       grille.replaceWith(vide)
     }
   }
@@ -339,6 +350,11 @@
 
     let index = 0
     const afficher = (suivant) => {
+      const cible = ((suivant % slides.length) + slides.length) % slides.length
+      if (cible === index) return
+      // « sort » : le texte de la diapo quittée glisse vers le bas, hors de son masque.
+      for (const slide of slides) slide.classList.remove("sort")
+      slides[index]?.classList.add("sort")
       slides[index]?.classList.remove("on")
       points[index]?.classList.remove("on")
       index = ((suivant % slides.length) + slides.length) % slides.length

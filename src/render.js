@@ -1,6 +1,22 @@
+import fs from "node:fs"
+import path from "node:path"
+import { fileURLToPath } from "node:url"
 import { IMG } from "./heiwa.js"
 import { libelleKind } from "./media.js"
 import { estPaletteNameplate, PALETTES_NAMEPLATE, urlNameplate } from "./nameplate.js"
+
+const DOSSIER_PUBLIC = path.join(path.dirname(fileURLToPath(import.meta.url)), "..", "public")
+
+/** Ajoute un paramètre de version basé sur la date du fichier pour éviter les caches obsolètes. */
+function asset(src) {
+  if (!src.startsWith("/")) return src
+  try {
+    const { mtimeMs } = fs.statSync(path.join(DOSSIER_PUBLIC, src.slice(1)))
+    return `${src}?v=${Math.floor(mtimeMs)}`
+  } catch {
+    return src
+  }
+}
 
 export const e = (t) => String(t ?? "").replace(/[&<>"']/g, (c) => ({
   "&": "&amp;",
@@ -44,7 +60,8 @@ export function avatarUrl(user, taille = 64) {
 /** Décoration d'avatar Discord : un preset PNG de 288 px, superposé à l'avatar. */
 export function avatarDecorationUrl(user) {
   if (!user?.avatar_decoration) return ""
-  return `https://cdn.discordapp.com/avatar-decoration-presets/${encodeURIComponent(user.avatar_decoration)}.png`
+  // `passthrough=true` : le CDN renvoie l'APNG animé (comme dans Discord).
+  return `https://cdn.discordapp.com/avatar-decoration-presets/${encodeURIComponent(user.avatar_decoration)}.png?size=240&passthrough=true`
 }
 
 /**
@@ -57,6 +74,54 @@ export function avatarAvecDecoration(user, { taille = 34, cdn = 64, classe = "av
     <img class="${classe}" src="${e(avatarUrl(user, cdn))}" alt="${e(alt)}" width="${taille}" height="${taille}">
     ${deco ? `<img class="deco-avatar" src="${e(deco)}" alt="" aria-hidden="true">` : ""}
   </span>`
+}
+
+/** Bannière du profil Discord (animée si le hash commence par `a_`), vide sinon. */
+export function banniereUrl(user) {
+  if (!user?.banner || !/^[A-Za-z0-9_]{1,64}$/.test(user.banner)) return ""
+  const extension = user.banner.startsWith("a_") ? "gif" : "png"
+  return `https://cdn.discordapp.com/banners/${encodeURIComponent(user.id)}/${user.banner}.${extension}?size=1024`
+}
+
+/** Couleur d'accent du profil Discord en `#rrggbb`, vide si absente. */
+export function couleurAccent(user) {
+  const n = user?.accent_color
+  return Number.isInteger(n) && n >= 0 && n <= 0xffffff ? `#${n.toString(16).padStart(6, "0")}` : ""
+}
+
+const BADGES_DISCORD = [
+  [1 << 0, "Équipe Discord"],
+  [1 << 1, "Partenaire Discord"],
+  [1 << 2, "HypeSquad Events"],
+  [1 << 3, "Chasseur de bugs"],
+  [1 << 14, "Chasseur de bugs (or)"],
+  [1 << 6, "HypeSquad Bravery"],
+  [1 << 7, "HypeSquad Brilliance"],
+  [1 << 8, "HypeSquad Balance"],
+  [1 << 9, "Soutien de la première heure"],
+  [1 << 17, "Développeur de bot certifié"],
+  [1 << 18, "Modérateur certifié"],
+  [1 << 22, "Développeur actif"],
+]
+const NITRO = { 1: "Nitro Classic", 2: "Nitro", 3: "Nitro Basic" }
+
+/** Badges du profil Discord déductibles de `identify` (Nitro + drapeaux publics). */
+export function badgesDiscord(user) {
+  const badges = []
+  if (NITRO[user?.premium_type]) badges.push(NITRO[user.premium_type])
+  const drapeaux = Number.isInteger(user?.public_flags) ? user.public_flags : 0
+  for (const [bit, libelle] of BADGES_DISCORD) if (drapeaux & bit) badges.push(libelle)
+  return badges
+}
+
+/** Tag de serveur Discord : `{ tag, badge }` (badge = URL ou vide), ou null. */
+export function tagServeur(user) {
+  if (!user?.guild_tag) return null
+  const valide = /^\d{5,32}$/.test(String(user.guild_id ?? "")) && /^[A-Za-z0-9_]{1,64}$/.test(String(user.guild_badge ?? ""))
+  return {
+    tag: String(user.guild_tag),
+    badge: valide ? `https://cdn.discordapp.com/guild-tag-badges/${user.guild_id}/${user.guild_badge}.png?size=32` : "",
+  }
 }
 
 /** Nameplate Discord : bannière statique affichée derrière le pseudo du profil. */
@@ -78,7 +143,8 @@ export function avecNameplate(user, contenu) {
   if (!url) return contenu
   const couleur = nameplateCouleur(user)
   return `<div class="profil-nameplate"${couleur ? ` style="--np-couleur:${e(couleur)}"` : ""}>
-    <img class="nameplate-image" src="${e(url)}" alt="" aria-hidden="true" width="672" height="126">
+    <video class="nameplate-image" aria-hidden="true" tabindex="-1" autoplay loop muted playsinline disablepictureinpicture
+      poster="${e(url)}" src="${e(url.replace(/static\.png$/, "asset.webm"))}" width="672" height="126"></video>
     <div class="profil-nameplate-contenu">${contenu}</div>
   </div>`
 }
@@ -199,6 +265,36 @@ const liensNav = [
   ["liste", "/liste", "Ma liste"],
 ]
 
+const LIEN_GITHUB = "https://github.com/ItzVyral/cineflow"
+
+/** Invitation Discord (DISCORD_SERVER_LINK), vide si absente ou mal formée. */
+function lienDiscord() {
+  const valeur = String(process.env.DISCORD_SERVER_LINK ?? "").trim()
+  return /^https:\/\/(discord\.gg|discord\.com\/invite)\/[A-Za-z0-9-]{2,64}$/.test(valeur) ? valeur : ""
+}
+
+/** Pied de page commun. La mention TMDB est obligatoire. */
+function piedDePage() {
+  const discord = lienDiscord()
+  return `<footer class="pied">
+  <div class="pied-haut">
+    <div class="pied-marque">
+      <img src="/logo.svg" alt="CineFlow" height="28">
+      <p>Données et images : TMDB. Ce site utilise l'API TMDB mais n'est ni approuvé ni certifié par TMDB.</p>
+    </div>
+    <nav class="pied-liens" aria-label="Liens du pied de page">
+      <a href="/mentions-legales">Mentions légales</a>
+      ${discord ? `<a href="${e(discord)}" target="_blank" rel="noopener noreferrer">Discord</a>` : ""}
+      <a href="${LIEN_GITHUB}" target="_blank" rel="noopener noreferrer">GitHub</a>
+    </nav>
+  </div>
+  <div class="pied-bas">
+    <span class="built" tabindex="0">Built by ItzVyral<span class="built-plus"><span><i>…and ✺ Claude too</i></span></span></span>
+  </div>
+  <div class="pied-geant" aria-hidden="true"><span>Cine</span><span>Flow</span></div>
+</footer>`
+}
+
 /**
  * Gabarit HTML commun. Tout ce qui vient de la base ou de TMDB doit être passé par e().
  */
@@ -211,13 +307,14 @@ export function page({ titre, corps, actif = "", user = null, recherche = "", ch
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
+<meta name="theme-color" content="#101012">
 <title>${e(titre)} · CineFlow</title>
 ${description ? `<meta name="description" content="${e(description)}">` : ""}
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;700;800&display=swap" rel="stylesheet">
 <link rel="icon" type="image/svg+xml" href="/icone.svg">
-<link rel="stylesheet" href="/style.css">
+<link rel="stylesheet" href="${asset("/style.css")}">
 </head>
 <body data-connecte="${user ? 1 : 0}" data-page="${e(nomPage)}">
 <header>
@@ -235,8 +332,8 @@ ${description ? `<meta name="description" content="${e(description)}">` : ""}
   </div>
 </header>
 ${corps}
-<footer>Données et images : TMDB. Ce site utilise l'API TMDB mais n'est ni approuvé ni certifié par TMDB.</footer>
-${scripts.map((src) => `<script src="${e(src)}" defer></script>`).join("\n")}
+${piedDePage()}
+${[...new Set([...scripts, "/motion.js"])].map((src) => `<script src="${e(asset(src))}" defer></script>`).join("\n")}
 </body>
 </html>`
 }
