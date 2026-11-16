@@ -39,3 +39,6 @@ services:
       # https://<ton-service>.onrender.com/auth/discord/callback
       - key: DISCORD_REDIRECT_URI
         sync: false
+      # Invitation du serveur Discord (pied de page)
+      - key: DISCORD_SERVER_LINK
+        value: https://discord.gg/Yc2RT8TKFq

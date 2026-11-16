@@ -165,6 +165,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 | `DISCORD_CLIENT_ID` | Client ID de l'application Discord. |
 | `DISCORD_CLIENT_SECRET` | Client Secret de l'application Discord. |
 | `DISCORD_REDIRECT_URI` | URL de retour OAuth2, identique à celle déclarée dans Discord. |
+| `DISCORD_SERVER_LINK` | Invitation du serveur Discord affichée dans le pied de page (facultatif). |
 | `SESSION_SECRET` | Secret HMAC des cookies de session, obligatoire en production. |
 
 `.env` est ignoré par Git. `.env.example` ne contient que les noms des
