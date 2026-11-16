@@ -86,6 +86,28 @@ Le site est disponible sur <http://localhost:3000>. La base SQLite est créée
 automatiquement dans `data/cineflow.db` au premier démarrage, avec ses
 migrations.
 
+## Déploiement sur Render
+
+Le fichier `render.yaml` décrit le service (Node 22, disque persistant pour
+SQLite monté sur `/var/data`, HTTPS géré par Render).
+
+1. Pousser le dépôt sur GitHub.
+2. Sur https://dashboard.render.com : **New > Blueprint**, choisir le dépôt.
+3. Renseigner les valeurs demandées : `HEIWA_CLE`, `HEIWA_SITE`, `TMDB_KEY`,
+   `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `DISCORD_REDIRECT_URI`
+   (`https://<service>.onrender.com/auth/discord/callback`).
+   `SESSION_SECRET` est généré automatiquement.
+4. Une fois en ligne :
+   - ajouter l'URL de redirection dans l'application Discord (OAuth2) ;
+   - déclarer le domaine `<service>.onrender.com` dans « Mes sites » sur
+     HeiwaStream, sinon les réglages du lecteur ne s'appliquent pas.
+
+Le disque persistant demande l'offre **Starter** (payante). Sur l'offre
+gratuite, il faut retirer le bloc `disk` : la base est alors effacée à chaque
+redéploiement ou redémarrage (sessions, favoris, reprise perdus).
+
+Chaque push sur `main` redéploie automatiquement.
+
 ## Configuration Discord
 
 1. Ouvre <https://discord.com/developers/applications> et crée une

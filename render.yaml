@@ -1,0 +1,44 @@
+# Blueprint Render : Dashboard Render > New > Blueprint > choisir ce dépôt.
+# Les valeurs marquées « sync: false » sont demandées à la création.
+services:
+  - type: web
+    name: cineflow
+    runtime: node
+    # Le disque persistant (base SQLite) exige une offre payante (Starter ou plus).
+    plan: starter
+    region: frankfurt
+    buildCommand: npm ci
+    startCommand: npm start
+    healthCheckPath: /
+    autoDeploy: true
+    disk:
+      name: cineflow-data
+      mountPath: /var/data
+      sizeGB: 1
+    envVars:
+      - key: NODE_VERSION
+        value: "22"
+      - key: NODE_ENV
+        value: production
+      # Render est un reverse proxy de confiance (HTTPS, IP du visiteur)
+      - key: TRUST_PROXY
+        value: "1"
+      - key: DATA_DIR
+        value: /var/data
+      - key: SESSION_SECRET
+        generateValue: true
+      - key: HEIWA_CLE
+        sync: false
+      - key: HEIWA_SITE
+        sync: false
+      - key: HEIWA_SANS_PUB
+        value: "0"
+      - key: TMDB_KEY
+        sync: false
+      - key: DISCORD_CLIENT_ID
+        sync: false
+      - key: DISCORD_CLIENT_SECRET
+        sync: false
+      # https://<ton-service>.onrender.com/auth/discord/callback
+      - key: DISCORD_REDIRECT_URI
+        sync: false
