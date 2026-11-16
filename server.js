@@ -212,19 +212,33 @@ const fichierPrincipal = fileURLToPath(import.meta.url)
 if (process.argv[1] && path.resolve(process.argv[1]) === fichierPrincipal) {
   avertissements()
 
-  const serveur = app.listen(port, () => {
-    console.log(`[CineFlow] Ouvre http://localhost:${port}`)
-    console.log(`[CineFlow] Base SQLite : ${db.cheminBase}`)
-  })
+  // PORT vide dans le .env : on prend le premier port libre à partir de 3000
+  const portAuto = !String(process.env.PORT ?? "").trim()
 
-  serveur.on("error", (erreur) => {
-    if (erreur?.code === "EADDRINUSE") {
-      console.error(`[CineFlow] Le port ${port} est déjà utilisé. Change PORT dans le .env.`)
-    } else {
-      console.error("[CineFlow] Impossible de démarrer le serveur :", erreur)
-    }
-    process.exitCode = 1
-  })
+  const demarrer = (p) => {
+    // Express 5 appelle aussi ce callback en cas d'erreur : on l'ignore ici
+    const serveur = app.listen(p, (erreur) => {
+      if (erreur) return
+      console.log(`[CineFlow] Ouvre http://localhost:${p}`)
+      console.log(`[CineFlow] Base SQLite : ${db.cheminBase}`)
+    })
+
+    serveur.on("error", (erreur) => {
+      if (erreur?.code === "EADDRINUSE" && portAuto && p < 65535) {
+        console.warn(`[CineFlow] Port ${p} occupé, essai du ${p + 1}…`)
+        demarrer(p + 1)
+        return
+      }
+      if (erreur?.code === "EADDRINUSE") {
+        console.error(`[CineFlow] Le port ${p} est déjà utilisé. Change PORT dans le .env (ou laisse-le vide).`)
+      } else {
+        console.error("[CineFlow] Impossible de démarrer le serveur :", erreur)
+      }
+      process.exitCode = 1
+    })
+  }
+
+  demarrer(port)
 }
 
 export { app }

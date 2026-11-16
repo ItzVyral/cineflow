@@ -116,7 +116,7 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 
 | Variable | Rôle |
 | --- | --- |
-| `PORT` | Port HTTP (défaut `3000`). |
+| `PORT` | Port HTTP. Vide : premier port libre à partir de `3000`. |
 | `NODE_ENV` | `production` active les cookies `Secure` et le cache des fichiers statiques. |
 | `TRUST_PROXY` | `1` derrière un reverse proxy de confiance (HTTPS, IP cliente réelle). |
 | `DATA_DIR` | Dossier de la base SQLite (défaut `data`). |
@@ -303,13 +303,19 @@ puis le supprime à la fin. Aucun avis n'est réellement envoyé à HeiwaStream.
 - La connexion Discord réelle : elle exige une application Discord valide
   (`DISCORD_CLIENT_ID` / `DISCORD_CLIENT_SECRET`) et une URL de retour
   déclarée.
-- L'envoi réel d'un avis à HeiwaStream : validé par le code et des réponses
-  simulées, volontairement pas testé sur leur service de production.
-- Le rendu visuel (badges, onglets, sélecteur d'épisode, décoration, nameplate
-  et rangée « Récemment vus ») n'a pas été contrôlé dans un navigateur ; les
-  pages ont été vérifiées en HTML et en CSS.
-- Le stockage `localStorage` des visiteurs n'a pas été exécuté dans un vrai
-  navigateur ; son rendu et sa validation sont couverts par le code client.
+- L'envoi réel d'un avis ou d'une demande de titre à HeiwaStream : validé par
+  le code, les tests d'intégration et des réponses simulées, volontairement pas
+  envoyé sur leur service de production.
+- Le presse-papiers réel : le navigateur de test refuse l'accès au
+  presse-papiers. Le retour « Lien copié » et `aria-live` ont été vérifiés en
+  simulant une copie réussie.
+- La disposition deux colonnes au-delà de 1020 px : la fenêtre de test ne
+  dépassait pas 517 px. Le panneau sous le lecteur, l'absence de débordement et
+  les styles desktop (colonne de 360 px, rayon 16 px, hauteur maximale) ont été
+  vérifiés dans le DOM et la feuille de style.
+- La lecture vidéo réelle et le `seek` auprès des hébergeurs : la
+  synchronisation repose sur les messages documentés `ready`, `time` et
+  `episode`, testés en injectant ces événements.
 
 ## Crédits
 
