@@ -169,6 +169,20 @@ authRouter.get("/discord/callback", async (req, res) => {
 
     const username = String(profil.global_name || profil.username || "Membre Discord").trim().slice(0, 64) || "Membre Discord"
     const avatar = typeof profil.avatar === "string" && /^[A-Za-z0-9_]+$/.test(profil.avatar) ? profil.avatar : null
+    // Bannière de profil et couleur d'accent : renvoyées par `identify`, validées avant stockage.
+    const banner = typeof profil.banner === "string" && /^[A-Za-z0-9_]{1,64}$/.test(profil.banner) ? profil.banner : null
+    const accentColor = Number.isInteger(profil.accent_color) && profil.accent_color >= 0 && profil.accent_color <= 0xffffff
+      ? profil.accent_color
+      : null
+    // Identité Discord affichée sur le profil. Tout est validé avant stockage.
+    const handle = typeof profil.username === "string" && /^[A-Za-z0-9_.]{2,32}$/.test(profil.username) ? profil.username : null
+    const publicFlags = Number.isInteger(profil.public_flags) && profil.public_flags >= 0 ? profil.public_flags : null
+    const premiumType = [0, 1, 2, 3].includes(profil.premium_type) ? profil.premium_type : null
+    // Tag de serveur (« primary_guild ») : seulement s'il est activé par le membre.
+    const guilde = profil.primary_guild?.identity_enabled ? profil.primary_guild : null
+    const guildId = /^\d{5,32}$/.test(String(guilde?.identity_guild_id ?? "")) ? String(guilde.identity_guild_id) : null
+    const guildTag = guildId && typeof guilde.tag === "string" && guilde.tag.trim() ? guilde.tag.trim().slice(0, 8) : null
+    const guildBadge = guildTag && typeof guilde.badge === "string" && /^[A-Za-z0-9_]{1,64}$/.test(guilde.badge) ? guilde.badge : null
     // Décorations d'avatar : disponibles avec le scope `identify`. L'asset doit
     // être validé avant de finir dans une URL CDN rendue côté HTML.
     const decoBrute = profil.avatar_decoration_data?.asset
@@ -186,6 +200,14 @@ authRouter.get("/discord/callback", async (req, res) => {
       avatarDecoration,
       nameplateAsset: estAssetNameplate(nameplateAsset) ? nameplateAsset : null,
       nameplatePalette: estPaletteNameplate(nameplatePalette) ? nameplatePalette : null,
+      banner,
+      accentColor,
+      handle,
+      publicFlags,
+      premiumType,
+      guildTag,
+      guildId: guildTag ? guildId : null,
+      guildBadge,
     })
     poserSession(res, id)
 

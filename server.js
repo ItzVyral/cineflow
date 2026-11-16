@@ -36,7 +36,8 @@ app.use(helmet({
         "https://www.youtube.com",
       ],
       connectSrc: ["'self'"],
-      mediaSrc: ["'self'", "https://heiwastream.fr"],
+      // cdn.discordapp.com : nameplate animée du profil (vidéo webm).
+      mediaSrc: ["'self'", "https://heiwastream.fr", "https://cdn.discordapp.com"],
       formAction: ["'self'"],
       frameAncestors: ["'self'"],
       baseUri: ["'self'"],

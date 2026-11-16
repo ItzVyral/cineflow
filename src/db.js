@@ -126,6 +126,20 @@ const migrations = [
   CREATE INDEX idx_history_user ON history(user_id, updated_at DESC);
   CREATE INDEX idx_recently_viewed_user ON recently_viewed(user_id, viewed_at DESC);
   `,
+  // Migration 2 : bannière de profil Discord et couleur d'accent (scope `identify`).
+  `
+  ALTER TABLE users ADD COLUMN banner TEXT;
+  ALTER TABLE users ADD COLUMN accent_color INTEGER
+  `,
+  // Migration 3 : identité Discord affichée sur le profil (pseudo, badges, Nitro, tag de serveur).
+  `
+  ALTER TABLE users ADD COLUMN handle TEXT;
+  ALTER TABLE users ADD COLUMN public_flags INTEGER;
+  ALTER TABLE users ADD COLUMN premium_type INTEGER;
+  ALTER TABLE users ADD COLUMN guild_tag TEXT;
+  ALTER TABLE users ADD COLUMN guild_id TEXT;
+  ALTER TABLE users ADD COLUMN guild_badge TEXT
+  `,
 ]
 
 async function migrer() {
@@ -160,24 +174,43 @@ export async function enregistrerUtilisateur({
   avatarDecoration = null,
   nameplateAsset = null,
   nameplatePalette = null,
+  banner = null,
+  accentColor = null,
+  handle = null,
+  publicFlags = null,
+  premiumType = null,
+  guildTag = null,
+  guildId = null,
+  guildBadge = null,
 }) {
   await query(`
-    INSERT INTO users (id, username, avatar, avatar_decoration, nameplate_asset, nameplate_palette)
-    VALUES ($1, $2, $3, $4, $5, $6)
+    INSERT INTO users (id, username, avatar, avatar_decoration, nameplate_asset, nameplate_palette, banner, accent_color,
+      handle, public_flags, premium_type, guild_tag, guild_id, guild_badge)
+    VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
     ON CONFLICT (id) DO UPDATE SET
       username = excluded.username,
       avatar = excluded.avatar,
       avatar_decoration = excluded.avatar_decoration,
       nameplate_asset = excluded.nameplate_asset,
-      nameplate_palette = excluded.nameplate_palette
-  `, [id, username, avatar, avatarDecoration, nameplateAsset, nameplatePalette])
+      nameplate_palette = excluded.nameplate_palette,
+      banner = excluded.banner,
+      accent_color = excluded.accent_color,
+      handle = excluded.handle,
+      public_flags = excluded.public_flags,
+      premium_type = excluded.premium_type,
+      guild_tag = excluded.guild_tag,
+      guild_id = excluded.guild_id,
+      guild_badge = excluded.guild_badge
+  `, [id, username, avatar, avatarDecoration, nameplateAsset, nameplatePalette, banner, accentColor,
+    handle, publicFlags, premiumType, guildTag, guildId, guildBadge])
 
   return utilisateur(id)
 }
 
 export async function utilisateur(id) {
   const { rows } = await query(`
-    SELECT id, username, avatar, avatar_decoration, nameplate_asset, nameplate_palette, created_at
+    SELECT id, username, avatar, avatar_decoration, nameplate_asset, nameplate_palette, banner, accent_color,
+      handle, public_flags, premium_type, guild_tag, guild_id, guild_badge, created_at
     FROM users WHERE id = $1
   `, [id])
   return rows[0] ?? null
