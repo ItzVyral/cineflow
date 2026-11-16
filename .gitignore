@@ -14,6 +14,9 @@ data/
 *.sqlite
 *.sqlite3
 
+# Configuration locale des outils
+.claude/settings.local.json
+
 # Logs et divers
 npm-debug.log*
 .DS_Store
