@@ -1,20 +1,16 @@
 # Blueprint Render : Dashboard Render > New > Blueprint > choisir ce dépôt.
 # Les valeurs marquées « sync: false » sont demandées à la création.
+# Les données sont dans Supabase (DATABASE_URL) : aucun disque n'est nécessaire.
 services:
   - type: web
     name: cineflow
     runtime: node
-    # Le disque persistant (base SQLite) exige une offre payante (Starter ou plus).
-    plan: starter
+    plan: free
     region: frankfurt
     buildCommand: npm ci
     startCommand: npm start
     healthCheckPath: /
     autoDeploy: true
-    disk:
-      name: cineflow-data
-      mountPath: /var/data
-      sizeGB: 1
     envVars:
       - key: NODE_VERSION
         value: "22"
@@ -23,8 +19,9 @@ services:
       # Render est un reverse proxy de confiance (HTTPS, IP du visiteur)
       - key: TRUST_PROXY
         value: "1"
-      - key: DATA_DIR
-        value: /var/data
+      # Supabase > Connect > Session pooler
+      - key: DATABASE_URL
+        sync: false
       - key: SESSION_SECRET
         generateValue: true
       - key: HEIWA_CLE

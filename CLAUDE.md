@@ -7,7 +7,7 @@ Site de streaming de films et séries. Données et images via TMDB, catalogue et
 - Node 18+, Express 5, ESM (`"type": "module"`)
 - HTML rendu côté serveur (template strings), JS vanilla dans `public/`
 - Pas de framework front, pas de bundler
-- Dépendances : `express`, `dotenv` (d'autres seulement si la tâche l'exige, ex. `better-sqlite3`, `helmet`)
+- Dépendances : `express`, `dotenv` (d'autres seulement si la tâche l'exige, ex. `pg`, `helmet`)
 
 ## Commandes
 
@@ -107,7 +107,7 @@ Webhooks (facultatif) : `POST /heiwa/webhook`, répondre 200 tout de suite, vér
 
 ## Idées prévues (pas encore faites)
 
-Connexion Discord (OAuth2, scope `identify`), favoris, liste de lecture, reprise de lecture en base (SQLite), formulaire d'avis, recherche, page catalogue, profil avec suppression des données.
+Connexion Discord (OAuth2, scope `identify`), favoris, liste de lecture, reprise de lecture en base (PostgreSQL / Supabase), formulaire d'avis, recherche, page catalogue, profil avec suppression des données.
 
 ## Règles pour l'IA
 

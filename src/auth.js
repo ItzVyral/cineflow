@@ -179,7 +179,7 @@ authRouter.get("/discord/callback", async (req, res) => {
     const nameplateAsset = nameplate?.asset
     const nameplatePalette = nameplate?.palette
 
-    db.enregistrerUtilisateur({
+    await db.enregistrerUtilisateur({
       id,
       username,
       avatar,

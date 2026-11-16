@@ -7,11 +7,12 @@
     "test:integration": "node test/integration.mjs"
   },
   "dependencies": {
-    "better-sqlite3": "^13.2.0",
+    "@electric-sql/pglite": "^0.5.16",
     "dotenv": "^16.4.5",
     "express": "^5.0.0",
     "express-rate-limit": "^8.7.4",
-    "helmet": "^8.3.0"
+    "helmet": "^8.3.0",
+    "pg": "^8.23.1"
   },
   "engines": {
     "node": ">=22"

@@ -220,7 +220,7 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fichierPrincipal) {
     const serveur = app.listen(p, (erreur) => {
       if (erreur) return
       console.log(`[CineFlow] Ouvre http://localhost:${p}`)
-      console.log(`[CineFlow] Base SQLite : ${db.cheminBase}`)
+      console.log(`[CineFlow] Base : ${db.descriptionBase}`)
     })
 
     serveur.on("error", (erreur) => {
@@ -238,7 +238,14 @@ if (process.argv[1] && path.resolve(process.argv[1]) === fichierPrincipal) {
     })
   }
 
-  demarrer(port)
+  // La base doit être migrée avant d’accepter des requêtes.
+  db.pret.then(
+    () => demarrer(port),
+    (erreur) => {
+      console.error("[CineFlow] Base de données inaccessible (DATABASE_URL ?) :", erreur?.message ?? erreur)
+      process.exit(1)
+    },
+  )
 }
 
 export { app }

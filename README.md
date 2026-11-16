@@ -7,7 +7,7 @@ HeiwaStream ; les fiches, affiches et logos viennent de TMDB (avec l'API
 HeiwaStream en secours).
 
 Le site fonctionne sans framework front : pages rendues côté serveur avec
-Express, JavaScript vanilla côté client, SQLite pour les comptes et les données
+Express, JavaScript vanilla côté client, PostgreSQL (Supabase en ligne) pour les comptes et les données
 personnelles.
 
 ## Fonctionnalités
@@ -47,11 +47,11 @@ personnelles.
   distingués par leur type. Pages dédiées `/favoris` et `/liste`.
 - **Reprise de lecture** : la progression réelle du lecteur HeiwaStream est
   enregistrée (événements `time`, `ended`) avec la saison et l'épisode, puis
-  reprise automatique via `t=` et `seek`. Elle est stockée en SQLite pour un
+  reprise automatique via `t=` et `seek`. Elle est stockée en base pour un
   compte connecté et dans `localStorage` pour un visiteur. Une rangée
   « Continuer de regarder » apparaît sur l'accueil.
 - **Récemment vus** : une rangée sur l'accueil liste les derniers titres
-  consultés. Elle est stockée en SQLite pour un compte connecté (sur tous ses
+  consultés. Elle est stockée en base pour un compte connecté (sur tous ses
   appareils) et dans `localStorage` pour un visiteur non connecté.
 - **Avis** : consultation des avis HeiwaStream et formulaire de note (1 à 5)
   avec commentaire et spoiler, pour les films comme pour les séries. Le cache
@@ -61,7 +61,7 @@ personnelles.
 
 ## Prérequis
 
-- **Node.js 22 ou plus** (nécessaire pour `better-sqlite3` 13).
+- **Node.js 22 ou plus**.
 - Une clé API HeiwaStream et l'identifiant public du site (`pk_…`).
 - Une clé API TMDB (v3), recommandée pour les affiches, les notes et les
   saisons. Sans elle, CineFlow bascule sur les fiches `GET /title/{type}/{id}`
@@ -82,18 +82,33 @@ Renseigne ensuite le `.env` (voir la section suivante), puis lance :
 npm start
 ```
 
-Le site est disponible sur <http://localhost:3000>. La base SQLite est créée
-automatiquement dans `data/cineflow.db` au premier démarrage, avec ses
-migrations.
+Le site est disponible sur <http://localhost:3000>. Sans `DATABASE_URL`, la base est un
+Postgres embarqué (PGlite) stocké dans `data/pglite`, créé au premier
+démarrage avec ses migrations : rien à installer. Avec `DATABASE_URL`, le
+site utilise ce PostgreSQL (Supabase en production).
+
+## Base Supabase
+
+1. Créer un projet sur https://supabase.com (offre gratuite) et noter le mot
+   de passe de la base.
+2. **Connect** (en haut du projet) > **Connection string** > **Session
+   pooler** : copier l'URL
+   `postgresql://postgres.<ref>:<mot de passe>@aws-…pooler.supabase.com:5432/postgres`.
+3. La mettre dans `DATABASE_URL` (`.env` en local, variables Render en
+   ligne). Les tables sont créées automatiquement au démarrage.
+
+Le serveur parle directement à Postgres : ni la clé `anon` ni le SDK Supabase
+ne sont utilisés. Sur l'offre gratuite, un projet sans activité pendant 7 jours
+est mis en pause : le réactiver depuis le tableau de bord Supabase.
 
 ## Déploiement sur Render
 
-Le fichier `render.yaml` décrit le service (Node 22, disque persistant pour
-SQLite monté sur `/var/data`, HTTPS géré par Render).
+Le fichier `render.yaml` décrit le service (offre gratuite, Node 22, HTTPS géré
+par Render). Les données sont dans Supabase (voir ci-dessus).
 
 1. Pousser le dépôt sur GitHub.
 2. Sur https://dashboard.render.com : **New > Blueprint**, choisir le dépôt.
-3. Renseigner les valeurs demandées : `HEIWA_CLE`, `HEIWA_SITE`, `TMDB_KEY`,
+3. Renseigner les valeurs demandées : `DATABASE_URL`, `HEIWA_CLE`, `HEIWA_SITE`, `TMDB_KEY`,
    `DISCORD_CLIENT_ID`, `DISCORD_CLIENT_SECRET`, `DISCORD_REDIRECT_URI`
    (`https://<service>.onrender.com/auth/discord/callback`).
    `SESSION_SECRET` est généré automatiquement.
@@ -102,9 +117,9 @@ SQLite monté sur `/var/data`, HTTPS géré par Render).
    - déclarer le domaine `<service>.onrender.com` dans « Mes sites » sur
      HeiwaStream, sinon les réglages du lecteur ne s'appliquent pas.
 
-Le disque persistant demande l'offre **Starter** (payante). Sur l'offre
-gratuite, il faut retirer le bloc `disk` : la base est alors effacée à chaque
-redéploiement ou redémarrage (sessions, favoris, reprise perdus).
+Sur l'offre gratuite, le service s'endort après 15 min sans visite et met
+environ 30 s à se réveiller. Les données ne sont pas perdues : elles sont dans
+Supabase.
 
 Chaque push sur `main` redéploie automatiquement.
 
@@ -141,7 +156,8 @@ node -e "console.log(require('crypto').randomBytes(32).toString('hex'))"
 | `PORT` | Port HTTP. Vide : premier port libre à partir de `3000`. |
 | `NODE_ENV` | `production` active les cookies `Secure` et le cache des fichiers statiques. |
 | `TRUST_PROXY` | `1` derrière un reverse proxy de confiance (HTTPS, IP cliente réelle). |
-| `DATA_DIR` | Dossier de la base SQLite (défaut `data`). |
+| `DATABASE_URL` | Chaîne PostgreSQL (Supabase « Session pooler »). Vide : PGlite local. |
+| `DATA_DIR` | Dossier de la base PGlite locale si `DATABASE_URL` est vide (défaut `data`). |
 | `HEIWA_CLE` | Clé privée de l'API HeiwaStream. Ne jamais la diffuser. |
 | `HEIWA_SITE` | Identifiant public du site (`pk_…`) utilisé par le lecteur. |
 | `HEIWA_SANS_PUB` | `1` active la demande de jeton sans publicité et le badge correspondant (défaut `0`). |
@@ -160,7 +176,7 @@ variables, jamais de valeur réelle.
 server.js               # application Express, sécurité, montage des routes
 src/
 ├── auth.js             # OAuth2 Discord, state signé, déconnexion
-├── db.js               # SQLite, migrations et requêtes préparées
+├── db.js               # PostgreSQL / PGlite, migrations, requêtes paramétrées
 ├── heiwa.js            # client HeiwaStream, TMDB et cache mémoire
 ├── media.js            # types (movie/tv), filtres (anime), libellés de badge
 ├── nameplate.js        # validation des assets/palettes et URL CDN Discord
@@ -198,7 +214,7 @@ public/
 
 ## Données et sécurité
 
-- Base SQLite : `users`, `favorites`, `watchlist`, `history`,
+- Base PostgreSQL : `users`, `favorites`, `watchlist`, `history`,
   `recently_viewed`. Les clés étrangères en cascade suppriment toutes les
   données d'un compte.
 - Un même identifiant TMDB pouvant désigner un film et une série, `favorites`,
@@ -256,7 +272,7 @@ public/
   épisode par épisode.
 - **Récemment vus (visiteur)** : la liste locale reste dans le navigateur
   (`cineflow:recemment-vus`) et ne suit pas le compte. La vider ou changer de
-  navigateur la fait disparaître ; un compte connecté utilise SQLite.
+  navigateur la fait disparaître ; un compte connecté utilise la base.
 - **Décoration d'avatar et nameplate** : elles sont lues à la connexion Discord
   et enregistrées avec le profil. Un changement sur Discord n'apparaît qu'après
   une nouvelle connexion au site. Seuls les presets statiques de nameplate sont
@@ -272,15 +288,15 @@ suivant), le JSON du panneau, les redirections 301 des anciennes adresses,
 `/serie/:id` vers la reprise, les demandes de titres (validation, statuts,
 limite), la décoration d'avatar, la nameplate, les titres récemment vus et
 l'API typée (401, 403, 404, 400, favoris, liste, historique, reprise), ainsi que
-les migrations SQLite. Elle a besoin d'un serveur déjà lancé et d'un
-`SESSION_SECRET` identique :
+le schéma PostgreSQL. Elle lance le serveur dans son propre processus :
 
 ```bash
-SESSION_SECRET=test-secret PORT=3999 node server.js &
-SESSION_SECRET=test-secret BASE_URL=http://localhost:3999 npm run test:integration
+SESSION_SECRET=test-secret npm run test:integration
 ```
 
-Le script crée l'utilisateur `123456789012345678` dans la base de `DATA_DIR`,
+`BASE_URL` permet de viser un serveur déjà lancé (même `SESSION_SECRET` et même
+`DATABASE_URL` obligatoires). Le script crée l'utilisateur `123456789012345678`
+dans la base (`DATABASE_URL`, sinon PGlite dans `DATA_DIR`),
 puis le supprime à la fin. Aucun avis n'est réellement envoyé à HeiwaStream.
 
 ## Vérifications manuelles

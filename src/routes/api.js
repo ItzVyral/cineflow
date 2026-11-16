@@ -36,37 +36,37 @@ function lireMedia(req, res) {
 
 // --- Favoris ----------------------------------------------------------------
 
-apiRouter.post("/favoris/:type/:id", exigerConnexion, (req, res) => {
+apiRouter.post("/favoris/:type/:id", exigerConnexion, async (req, res) => {
   const media = lireMedia(req, res)
   if (!media) return
 
-  db.ajouterFavori(req.user.id, media.type, media.id)
+  await db.ajouterFavori(req.user.id, media.type, media.id)
   res.json({ favori: true, ...media })
 })
 
-apiRouter.delete("/favoris/:type/:id", exigerConnexion, (req, res) => {
+apiRouter.delete("/favoris/:type/:id", exigerConnexion, async (req, res) => {
   const media = lireMedia(req, res)
   if (!media) return
 
-  db.retirerFavori(req.user.id, media.type, media.id)
+  await db.retirerFavori(req.user.id, media.type, media.id)
   res.json({ favori: false, ...media })
 })
 
 // --- Liste de lecture -------------------------------------------------------
 
-apiRouter.post("/liste/:type/:id", exigerConnexion, (req, res) => {
+apiRouter.post("/liste/:type/:id", exigerConnexion, async (req, res) => {
   const media = lireMedia(req, res)
   if (!media) return
 
-  db.ajouterListe(req.user.id, media.type, media.id)
+  await db.ajouterListe(req.user.id, media.type, media.id)
   res.json({ liste: true, ...media })
 })
 
-apiRouter.delete("/liste/:type/:id", exigerConnexion, (req, res) => {
+apiRouter.delete("/liste/:type/:id", exigerConnexion, async (req, res) => {
   const media = lireMedia(req, res)
   if (!media) return
 
-  db.retirerListe(req.user.id, media.type, media.id)
+  await db.retirerListe(req.user.id, media.type, media.id)
   res.json({ liste: false, ...media })
 })
 
@@ -79,7 +79,7 @@ function entierBorne(valeur, max, defaut) {
   return Number.isInteger(nombre) && nombre >= 0 && nombre <= max ? nombre : null
 }
 
-apiRouter.put("/historique/:type/:id", exigerConnexion, (req, res) => {
+apiRouter.put("/historique/:type/:id", exigerConnexion, async (req, res) => {
   const media = lireMedia(req, res)
   if (!media) return
 
@@ -99,7 +99,7 @@ apiRouter.put("/historique/:type/:id", exigerConnexion, (req, res) => {
   const duration = Number.isFinite(dureeBrute) && dureeBrute > 0 ? Math.min(dureeBrute, 86_400) : 0
   const progress = Math.min(position, duration || position, 86_400)
 
-  db.enregistrerProgression(req.user.id, media.type, media.id, {
+  await db.enregistrerProgression(req.user.id, media.type, media.id, {
     progress,
     duration,
     season: media.type === "tv" ? season : 0,

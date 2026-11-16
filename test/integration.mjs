@@ -1,17 +1,15 @@
 // Suite d'intégration CineFlow — s'exécute contre un serveur déjà lancé.
-//   SESSION_SECRET=test-secret PORT=3999 node server.js &
-//   SESSION_SECRET=test-secret BASE_URL=http://localhost:3999 npm run test:integration
+//   npm run test:integration
+// Sans BASE_URL, le serveur est lancé dans ce processus (même base que le test).
+// DATA_DIR / DATABASE_URL choisissent la base (PGlite local par défaut).
 //
 // Le script crée un utilisateur de test, exerce les pages et l'API typée, puis
 // supprime ses données. La base ciblée est celle de DATA_DIR (défaut `data`).
-import { spawnSync } from "node:child_process"
-import fs from "node:fs"
-import os from "node:os"
 import path from "node:path"
 import { fileURLToPath, pathToFileURL } from "node:url"
 
 const RACINE = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..")
-const BASE = process.env.BASE_URL ?? "http://localhost:3999"
+let BASE = process.env.BASE_URL
 const UTILISATEUR = "123456789012345678"
 
 process.env.SESSION_SECRET = process.env.SESSION_SECRET ?? "test-secret"
@@ -33,11 +31,19 @@ function verifier(nom, condition, detail = "") {
 
 const { creerJetonSession } = await import(pathToFileURL(path.join(RACINE, "src/session.js")).href)
 const db = await import(pathToFileURL(path.join(RACINE, "src/db.js")).href)
+await db.pret
+
+let serveurLocal = null
+if (!BASE) {
+  const { app } = await import(pathToFileURL(path.join(RACINE, "server.js")).href)
+  serveurLocal = await new Promise((ok) => { const s = app.listen(0, () => ok(s)) })
+  BASE = `http://localhost:${serveurLocal.address().port}`
+}
 
 const DECORATION = "a_0123456789abcdef"
 const NAMEPLATE = "nameplates/nameplates/twilight/"
 const NAMEPLATE_PALETTE = "cobalt"
-db.enregistrerUtilisateur({
+await db.enregistrerUtilisateur({
   id: UTILISATEUR,
   username: "Testeur",
   avatar: null,
@@ -223,7 +229,7 @@ const saisonInvalide = await requete("/api/historique/tv/46260", {
 })
 verifier("PUT historique saison invalide → 400", saisonInvalide.statut === 400)
 
-const progression = db.progression(UTILISATEUR, "tv", 46260)
+const progression = await db.progression(UTILISATEUR, "tv", 46260)
 verifier("DB : saison et épisode enregistrés", progression?.season === 2 && progression?.episode === 53)
 
 const reprise = await page("/serie/46260/2/53", { avecCookie: true })
@@ -286,7 +292,7 @@ await page("/film/550", { avecCookie: true })
 await page("/film/603", { avecCookie: true })
 await page("/film/550", { avecCookie: true })
 
-const vues = db.listerVues(UTILISATEUR)
+const vues = await db.listerVues(UTILISATEUR)
 verifier("DB : titres récemment vus enregistrés", vues.length >= 2)
 verifier("DB : dernière vue en tête", vues[0]?.media_type === "movie" && vues[0]?.tmdb_id === 550)
 verifier("DB : vues dédupliquées", vues.filter((vue) => vue.media_type === "movie" && vue.tmdb_id === 550).length === 1)
@@ -301,107 +307,36 @@ verifier("accueil connecté : pas d'emplacement local", !accueilVues.texte.inclu
 await requete("/api/favoris/movie/550", { methode: "DELETE", avecCookie: true })
 await requete("/api/favoris/tv/46260", { methode: "DELETE", avecCookie: true })
 await requete("/api/liste/movie/550", { methode: "DELETE", avecCookie: true })
-db.supprimerUtilisateur(UTILISATEUR)
+await db.supprimerUtilisateur(UTILISATEUR)
 
-verifier("DB : version 5", db.db.pragma("user_version", { simple: true }) === 5)
-verifier("DB : favorites.media_type", db.db.prepare("PRAGMA table_info(favorites)").all().some((c) => c.name === "media_type"))
-verifier("DB : history.season/episode", ["season", "episode"].every((n) => db.db.prepare("PRAGMA table_info(history)").all().some((c) => c.name === n)))
-verifier("DB : users.avatar_decoration", db.db.prepare("PRAGMA table_info(users)").all().some((c) => c.name === "avatar_decoration"))
-verifier("DB : users.nameplate_asset/palette", ["nameplate_asset", "nameplate_palette"].every((n) => db.db.prepare("PRAGMA table_info(users)").all().some((c) => c.name === n)))
-verifier("DB : recently_viewed typé", ["media_type", "tmdb_id", "viewed_at"].every((n) => db.db.prepare("PRAGMA table_info(recently_viewed)").all().some((c) => c.name === n)))
-verifier("DB : vues supprimées avec le compte", db.listerVues(UTILISATEUR).length === 0)
-verifier("DB : clés étrangères valides", db.db.prepare("PRAGMA foreign_key_check").all().length === 0)
-verifier("DB : intégrité OK", db.db.pragma("integrity_check", { simple: true }) === "ok")
-verifier("DB : utilisateur de test supprimé", db.utilisateur(UTILISATEUR) == null)
+verifier("DB : vues supprimées avec le compte", (await db.listerVues(UTILISATEUR)).length === 0)
+verifier("DB : utilisateur de test supprimé", (await db.utilisateur(UTILISATEUR)) == null)
 
-// --- Migrations isolées (v1 → v5, base neuve) ------------------------------
+// --- Schéma PostgreSQL ------------------------------------------------------
 
-const racine = RACINE
-const dossierV1 = path.join(os.tmpdir(), "cineflow-test-v1")
-const dossierNeuf = path.join(os.tmpdir(), "cineflow-test-neuf")
-fs.rmSync(dossierV1, { recursive: true, force: true })
-fs.rmSync(dossierNeuf, { recursive: true, force: true })
-fs.mkdirSync(dossierV1, { recursive: true })
-fs.mkdirSync(dossierNeuf, { recursive: true })
+const colonnes = async (table) => new Set((await db.requeteBrute(
+  "SELECT column_name FROM information_schema.columns WHERE table_schema = current_schema() AND table_name = $1",
+  [table],
+)).rows.map((c) => c.column_name))
+const [usersCols, historyCols, vuesCols] = await Promise.all([colonnes("users"), colonnes("history"), colonnes("recently_viewed")])
+const tables = (await db.requeteBrute(
+  "SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema() ORDER BY table_name",
+)).rows.map((t) => t.table_name)
+verifier("schéma : 6 tables", JSON.stringify(tables) === JSON.stringify(["favorites", "history", "recently_viewed", "schema_version", "users", "watchlist"]), JSON.stringify(tables))
+verifier("schéma : version à jour", (await db.requeteBrute("SELECT version FROM schema_version")).rows[0]?.version === db.versionSchema)
+verifier("schéma : users.nameplate", ["avatar_decoration", "nameplate_asset", "nameplate_palette"].every((n) => usersCols.has(n)))
+verifier("schéma : history.season/episode", ["season", "episode"].every((n) => historyCols.has(n)))
+verifier("schéma : recently_viewed typé", ["media_type", "tmdb_id", "viewed_at"].every((n) => vuesCols.has(n)))
 
-const scriptV1 = `
-import Database from "better-sqlite3"
-const db = new Database(${JSON.stringify(path.join(dossierV1, "cineflow.db"))})
-db.pragma("journal_mode = WAL")
-db.exec(\`
-  CREATE TABLE users (id TEXT PRIMARY KEY, username TEXT NOT NULL, avatar TEXT, created_at TEXT NOT NULL DEFAULT (datetime('now')));
-  CREATE TABLE favorites (user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, tmdb_id INTEGER NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now')), PRIMARY KEY (user_id, tmdb_id));
-  CREATE TABLE watchlist (user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, tmdb_id INTEGER NOT NULL, created_at TEXT NOT NULL DEFAULT (datetime('now')), PRIMARY KEY (user_id, tmdb_id));
-  CREATE TABLE history (user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE, tmdb_id INTEGER NOT NULL, progress REAL NOT NULL DEFAULT 0, duration REAL NOT NULL DEFAULT 0, updated_at TEXT NOT NULL DEFAULT (datetime('now')), PRIMARY KEY (user_id, tmdb_id));
-  PRAGMA user_version = 1;
-  INSERT INTO users (id, username) VALUES ('u1', 'Ancien');
-  INSERT INTO favorites (user_id, tmdb_id) VALUES ('u1', 550);
-  INSERT INTO watchlist (user_id, tmdb_id) VALUES ('u1', 603);
-  INSERT INTO history (user_id, tmdb_id, progress, duration) VALUES ('u1', 550, 42, 8400);
-\`)
-db.close()
-`
+// Données orphelines (clé étrangère contournée) : il ne doit y en avoir aucune.
+const orphelins = (await db.requeteBrute(`
+  SELECT (SELECT COUNT(*) FROM favorites f WHERE NOT EXISTS (SELECT 1 FROM users u WHERE u.id = f.user_id))
+       + (SELECT COUNT(*) FROM history h WHERE NOT EXISTS (SELECT 1 FROM users u WHERE u.id = h.user_id)) AS n
+`)).rows[0].n
+verifier("DB : aucune donnée orpheline", Number(orphelins) === 0)
 
-const migration = spawnSync(process.execPath, ["--input-type=module", "-e", scriptV1], { cwd: racine, encoding: "utf8" })
-verifier("migration : schéma v1 créé", migration.status === 0, migration.stderr)
-
-const urlDbV1 = `${pathToFileURL(path.join(RACINE, "src/db.js")).href}?test-v1`
-const scriptVerifV1 = `
-process.env.DATA_DIR = ${JSON.stringify(dossierV1)}
-const m = await import(${JSON.stringify(urlDbV1)})
-const out = {
-  version: m.db.pragma("user_version", { simple: true }),
-  favoris: m.listerFavoris("u1").map((l) => [l.media_type, l.tmdb_id]),
-  liste: m.listerListe("u1").map((l) => [l.media_type, l.tmdb_id]),
-  progression: m.progression("u1", "movie", 550),
-  deco: m.utilisateur("u1")?.avatar_decoration,
-  nameplate: m.utilisateur("u1")?.nameplate_asset,
-  palette: m.utilisateur("u1")?.nameplate_palette,
-  vues: m.listerVues("u1").length,
-  fk: m.db.prepare("PRAGMA foreign_key_check").all().length,
-  integrite: m.db.pragma("integrity_check", { simple: true }),
-}
-console.log(JSON.stringify(out))
-`
-const verifV1 = spawnSync(process.execPath, ["--input-type=module", "-e", scriptVerifV1], { cwd: racine, encoding: "utf8" })
-let v1 = null
-try { v1 = JSON.parse(verifV1.stdout.trim()) } catch { /* signalé plus bas */ }
-verifier("migration v1 : script exécuté", verifV1.status === 0 && v1 != null, verifV1.stderr)
-verifier("migration v1 → version 5", v1?.version === 5)
-verifier("migration v1 : favori conservé en movie", JSON.stringify(v1?.favoris) === JSON.stringify([["movie", 550]]))
-verifier("migration v1 : liste conservée en movie", JSON.stringify(v1?.liste) === JSON.stringify([["movie", 603]]))
-verifier("migration v1 : historique conservé", v1?.progression?.progress === 42 && v1?.progression?.season === 0 && v1?.progression?.episode === 0)
-verifier("migration v1 : décoration nulle", v1?.deco === null)
-verifier("migration v1 : nameplate nulle", v1?.nameplate === null && v1?.palette === null)
-verifier("migration v1 : aucune vue récente", v1?.vues === 0)
-verifier("migration v1 : intégrité OK", v1?.fk === 0 && v1?.integrite === "ok")
-
-const urlDbNeuf = `${pathToFileURL(path.join(RACINE, "src/db.js")).href}?test-neuf`
-const scriptNeuf = `
-process.env.DATA_DIR = ${JSON.stringify(dossierNeuf)}
-const m = await import(${JSON.stringify(urlDbNeuf)})
-console.log(JSON.stringify({
-  version: m.db.pragma("user_version", { simple: true }),
-  tables: m.db.prepare("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name").all().map((t) => t.name),
-  deco: m.db.prepare("PRAGMA table_info(users)").all().some((c) => c.name === "avatar_decoration"),
-  nameplate: ["nameplate_asset", "nameplate_palette"].every((n) => m.db.prepare("PRAGMA table_info(users)").all().some((c) => c.name === n)),
-  vues: m.db.prepare("PRAGMA table_info(recently_viewed)").all().some((c) => c.name === "viewed_at"),
-  integrite: m.db.pragma("integrity_check", { simple: true }),
-}))
-`
-const neuf = spawnSync(process.execPath, ["--input-type=module", "-e", scriptNeuf], { cwd: racine, encoding: "utf8" })
-let frais = null
-try { frais = JSON.parse(neuf.stdout.trim()) } catch { /* signalé plus bas */ }
-verifier("base neuve : script exécuté", neuf.status === 0 && frais != null, neuf.stderr)
-verifier("base neuve : version 5", frais?.version === 5)
-verifier("base neuve : 5 tables", JSON.stringify(frais?.tables) === JSON.stringify(["favorites", "history", "recently_viewed", "users", "watchlist"]))
-verifier("base neuve : colonne avatar_decoration", frais?.deco === true)
-verifier("base neuve : colonnes nameplate", frais?.nameplate === true)
-verifier("base neuve : table recently_viewed", frais?.vues === true)
-verifier("base neuve : intégrité OK", frais?.integrite === "ok")
-
-fs.rmSync(dossierV1, { recursive: true, force: true })
-fs.rmSync(dossierNeuf, { recursive: true, force: true })
+if (serveurLocal) serveurLocal.close()
+await db.fermerBase()
 
 // --- Résultat ---------------------------------------------------------------
 

@@ -113,10 +113,10 @@ export function cheminRetour(valeur, defaut = "/") {
 }
 
 export function middlewareSession(db) {
-  return (req, res, next) => {
+  return async (req, res, next) => {
     const jeton = lireCookie(req, NOM_SESSION)
     const userId = verifierJetonSession(jeton)
-    const utilisateur = userId ? db.utilisateur(userId) : null
+    const utilisateur = userId ? await db.utilisateur(userId).catch(() => null) : null
 
     req.user = utilisateur
     res.locals.user = utilisateur

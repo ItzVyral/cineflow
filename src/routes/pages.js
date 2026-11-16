@@ -59,9 +59,10 @@ const CATALOGUES = {
   anime: { libelle: "Animés", texte: "Les derniers animés ajoutés au catalogue HeiwaStream." },
 }
 
-function etatsUtilisateur(user) {
+async function etatsUtilisateur(user) {
   if (!user) return { favoris: new Set(), liste: new Set() }
-  return { favoris: db.idsFavoris(user.id), liste: db.idsListe(user.id) }
+  const [favoris, liste] = await Promise.all([db.idsFavoris(user.id), db.idsListe(user.id)])
+  return { favoris, liste }
 }
 
 /**
@@ -150,12 +151,13 @@ function dateLisible(valeur) {
 
 function dateFr(sqlite) {
   if (!sqlite) return ""
-  const date = new Date(`${String(sqlite).replace(" ", "T")}Z`)
+  const date = sqlite instanceof Date ? sqlite : new Date(sqlite)
   if (Number.isNaN(date.getTime())) return ""
   return date.toLocaleDateString("fr-FR", { day: "numeric", month: "long", year: "numeric" })
 }
 
-async function blocContinuer(user, etats, lignes = db.historiqueContinu(user.id, 12)) {
+async function blocContinuer(user, etats, lignes) {
+  lignes ??= await db.historiqueContinu(user.id, 12)
   if (!lignes.length) return ""
 
   const cartes = (await parLots(lignes, async (ligne) => {
@@ -183,7 +185,7 @@ async function blocContinuer(user, etats, lignes = db.historiqueContinu(user.id,
 
 /** Rangée des derniers titres consultés par un compte connecté. */
 async function blocRecemmentVus(user, etats, exclure = new Set()) {
-  const lignes = db.listerVues(user.id, 12)
+  const lignes = await db.listerVues(user.id, 12)
   const cartes = (await parLots(lignes, async (ligne) => {
     const cle = cleMedia(ligne.media_type, ligne.tmdb_id)
     if (exclure.has(cle)) return ""
@@ -781,7 +783,7 @@ function blocInfosMedia(media, {
 
 pagesRouter.get("/", async (req, res, next) => {
   try {
-    const etats = etatsUtilisateur(req.user)
+    const etats = await etatsUtilisateur(req.user)
     let medias = []
 
     try {
@@ -824,7 +826,7 @@ pagesRouter.get("/", async (req, res, next) => {
       liste: etats.liste.has(cleMedia(media.type, media.id)),
     })).join("")
 
-    const continuerLignes = req.user ? db.historiqueContinu(req.user.id, 12) : []
+    const continuerLignes = req.user ? await db.historiqueContinu(req.user.id, 12) : []
     const continuer = req.user ? await blocContinuer(req.user, etats, continuerLignes) : ""
     const dejaEnCours = new Set(continuerLignes.map((ligne) => cleMedia(ligne.media_type, ligne.tmdb_id)))
     const recents = req.user ? await blocRecemmentVus(req.user, etats, dejaEnCours) : ""
@@ -900,14 +902,14 @@ async function rendreLecture(req, res, next, {
   // utilisent localStorage (voir public/app.js).
   if (req.user) {
     try {
-      db.enregistrerVue(req.user.id, type, id)
+      await db.enregistrerVue(req.user.id, type, id)
     } catch (erreur) {
       console.warn(`[CineFlow] Vue non enregistrée : ${erreur instanceof Error ? erreur.message : String(erreur)}`)
     }
   }
 
   const estSerie = type === "tv"
-  const historique = req.user ? db.progression(req.user.id, type, id) : null
+  const historique = req.user ? await db.progression(req.user.id, type, id) : null
   const memeEpisode = !estSerie
     || (Number(historique?.season) === Number(saison) && Number(historique?.episode) === Number(episode))
   const dejaVu = historique && historique.duration > 0 && historique.progress / historique.duration < 0.95
@@ -956,9 +958,9 @@ async function rendreLecture(req, res, next, {
       </aside>`
     : ""
 
-  const favori = req.user ? db.estFavori(req.user.id, type, id) : false
-  const dansListe = req.user ? db.estDansListe(req.user.id, type, id) : false
-  const etats = etatsUtilisateur(req.user)
+  const favori = req.user ? await db.estFavori(req.user.id, type, id) : false
+  const dansListe = req.user ? await db.estDansListe(req.user.id, type, id) : false
+  const etats = await etatsUtilisateur(req.user)
   const similaires = await similairesDisponibles(media)
 
   const fond = media.backdrop_path ? ` style="--bg:url(${e(`${IMG}original${media.backdrop_path}`)})"` : ""
@@ -1099,7 +1101,7 @@ pagesRouter.get("/serie/:id", async (req, res, next) => {
 
   // Un compte connecté reprend directement son dernier épisode.
   if (req.user) {
-    const historique = db.progression(req.user.id, "tv", id)
+    const historique = await db.progression(req.user.id, "tv", id)
     if (entierPositif(historique?.season) && entierPositif(historique?.episode)) {
       const parametres = new URLSearchParams()
       if (typeof req.query.lang === "string" && req.query.lang) parametres.set("lang", req.query.lang)
@@ -1172,7 +1174,7 @@ pagesRouter.get("/titre/:type/:id", (req, res) => {
 pagesRouter.get("/recherche", async (req, res, next) => {
   const q = typeof req.query.q === "string" ? req.query.q.trim().slice(0, 100) : ""
   const filtre = filtreRecherche(req.query.type)
-  const etats = etatsUtilisateur(req.user)
+  const etats = await etatsUtilisateur(req.user)
 
   let medias = []
   let message = ""
@@ -1227,7 +1229,7 @@ pagesRouter.get("/catalogue", async (req, res, next) => {
   const type = estTypeCatalogue(req.query.type) ? req.query.type : "movie"
   const pageDemandee = Number.parseInt(req.query.page, 10)
   const numero = Number.isInteger(pageDemandee) ? Math.max(1, Math.min(20, pageDemandee)) : 1
-  const etats = etatsUtilisateur(req.user)
+  const etats = await etatsUtilisateur(req.user)
   const infos = CATALOGUES[type]
 
   try {
@@ -1265,7 +1267,7 @@ pagesRouter.get("/catalogue", async (req, res, next) => {
 // --- Favoris / liste de lecture --------------------------------------------
 
 async function pageListe(req, res, { actif, nomPage, titre, lignes, videTitre, videTexte }) {
-  const etats = etatsUtilisateur(req.user)
+  const etats = await etatsUtilisateur(req.user)
 
   if (!req.user) {
     return res.send(page({
@@ -1314,7 +1316,7 @@ async function pageListe(req, res, { actif, nomPage, titre, lignes, videTitre, v
 
 pagesRouter.get("/favoris", async (req, res, next) => {
   try {
-    const lignes = req.user ? db.listerFavoris(req.user.id) : []
+    const lignes = req.user ? await db.listerFavoris(req.user.id) : []
     await pageListe(req, res, {
       actif: "favoris",
       nomPage: "favoris",
@@ -1330,7 +1332,7 @@ pagesRouter.get("/favoris", async (req, res, next) => {
 
 pagesRouter.get("/liste", async (req, res, next) => {
   try {
-    const lignes = req.user ? db.listerListe(req.user.id) : []
+    const lignes = req.user ? await db.listerListe(req.user.id) : []
     await pageListe(req, res, {
       actif: "liste",
       nomPage: "liste",
@@ -1346,7 +1348,7 @@ pagesRouter.get("/liste", async (req, res, next) => {
 
 // --- Profil -----------------------------------------------------------------
 
-pagesRouter.get("/profil", (req, res) => {
+pagesRouter.get("/profil", async (req, res) => {
   if (!req.user) {
     return res.send(page({
       titre: "Profil",
@@ -1365,7 +1367,7 @@ pagesRouter.get("/profil", (req, res) => {
     }))
   }
 
-  const comptes = db.compteurs(req.user.id)
+  const comptes = await db.compteurs(req.user.id)
   const membreDepuis = dateFr(req.user.created_at)
   const identite = `<h1>${e(req.user.username)}</h1>
           ${membreDepuis ? `<p class="vide">Membre depuis le ${e(membreDepuis)}</p>` : ""}`
@@ -1403,7 +1405,7 @@ pagesRouter.get("/profil", (req, res) => {
   }))
 })
 
-pagesRouter.post("/profil/supprimer", (req, res) => {
+pagesRouter.post("/profil/supprimer", async (req, res) => {
   if (!req.user) return res.redirect("/")
 
   const confirmation = String(req.body?.confirmation ?? "").trim()
@@ -1416,7 +1418,7 @@ pagesRouter.post("/profil/supprimer", (req, res) => {
     ))
   }
 
-  db.supprimerUtilisateur(req.user.id)
+  await db.supprimerUtilisateur(req.user.id)
   effacerSession(res)
   res.redirect("/?compte=supprime")
 })

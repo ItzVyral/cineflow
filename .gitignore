@@ -6,7 +6,7 @@ node_modules/
 .env.*
 !.env.example
 
-# Données locales (SQLite + WAL)
+# Données locales (PGlite, anciennes bases SQLite)
 data/
 *.db
 *.db-shm
