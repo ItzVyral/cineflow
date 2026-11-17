@@ -140,6 +140,16 @@ const migrations = [
   ALTER TABLE users ADD COLUMN guild_id TEXT;
   ALTER TABLE users ADD COLUMN guild_badge TEXT
   `,
+  // Migration 4 : temps de visionnage par jour (heure de Paris) et par type, pour les statistiques du profil.
+  `
+  CREATE TABLE watch_days (
+    user_id TEXT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    day DATE NOT NULL,
+    media_type TEXT NOT NULL CHECK (media_type IN ('movie', 'tv')),
+    seconds INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY (user_id, day, media_type)
+  )
+  `,
 ]
 
 async function migrer() {
@@ -281,16 +291,50 @@ export const listerListe = (userId) => lister("watchlist", userId)
  */
 export async function enregistrerProgression(userId, type, tmdbId, { progress, duration, season = 0, episode = 0 }) {
   const id = verifierMedia(type, tmdbId)
-  await query(`
-    INSERT INTO history (user_id, media_type, tmdb_id, season, episode, progress, duration, updated_at)
-    VALUES ($1, $2, $3, $4, $5, $6, $7, clock_timestamp())
-    ON CONFLICT (user_id, media_type, tmdb_id) DO UPDATE SET
-      season = excluded.season,
-      episode = excluded.episode,
-      progress = excluded.progress,
-      duration = excluded.duration,
-      updated_at = clock_timestamp()
-  `, [userId, type, id, season, episode, progress, duration])
+  await moteur.transaction(async (tx) => {
+    // Temps réellement regardé depuis la sauvegarde précédente du même épisode :
+    // l'avancée de la position, plafonnée par le temps écoulé (un saut en avant ne compte pas).
+    const { rows } = await tx.query(`
+      SELECT season, episode, progress,
+        EXTRACT(EPOCH FROM (clock_timestamp() - updated_at))::float8 AS ecoule
+      FROM history WHERE user_id = $1 AND media_type = $2 AND tmdb_id = $3
+      FOR UPDATE
+    `, [userId, type, id])
+    const avant = rows[0]
+    let regarde = 0
+    if (avant && Number(avant.season) === season && Number(avant.episode) === episode) {
+      regarde = Math.min(Number(progress) - Number(avant.progress), Number(avant.ecoule) + 5)
+    }
+
+    await tx.query(`
+      INSERT INTO history (user_id, media_type, tmdb_id, season, episode, progress, duration, updated_at)
+      VALUES ($1, $2, $3, $4, $5, $6, $7, clock_timestamp())
+      ON CONFLICT (user_id, media_type, tmdb_id) DO UPDATE SET
+        season = excluded.season,
+        episode = excluded.episode,
+        progress = excluded.progress,
+        duration = excluded.duration,
+        updated_at = clock_timestamp()
+    `, [userId, type, id, season, episode, progress, duration])
+
+    const secondes = Math.floor(regarde)
+    if (secondes > 0) {
+      await tx.query(`
+        INSERT INTO watch_days (user_id, day, media_type, seconds)
+        VALUES ($1, (clock_timestamp() AT TIME ZONE 'Europe/Paris')::date, $2, $3)
+        ON CONFLICT (user_id, day, media_type) DO UPDATE SET seconds = watch_days.seconds + excluded.seconds
+      `, [userId, type, secondes])
+    }
+  })
+}
+
+/** Temps de visionnage par jour (`YYYY-MM-DD`, heure de Paris) et par type. */
+export async function joursVisionnage(userId) {
+  const { rows } = await query(`
+    SELECT to_char(day, 'YYYY-MM-DD') AS jour, media_type, seconds FROM watch_days
+    WHERE user_id = $1 ORDER BY day
+  `, [userId])
+  return rows.map((ligne) => ({ jour: ligne.jour, type: ligne.media_type, secondes: Number(ligne.seconds) || 0 }))
 }
 
 export async function progression(userId, type, tmdbId) {

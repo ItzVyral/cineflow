@@ -338,17 +338,59 @@ ${[...new Set([...scripts, "/motion.js"])].map((src) => `<script src="${e(asset(
 </html>`
 }
 
+const SCENES_ERREUR = {
+  403: "Accès coupé",
+  404: "Scène introuvable",
+  429: "Projection saturée",
+  500: "Bobine bloquée",
+  502: "Projecteur en panne",
+  503: "Salle fermée",
+}
+
 export function pageErreur(statut, titre, message, { user = null, chemin = "/" } = {}) {
+  const code = String(statut)
+  const scene = SCENES_ERREUR[statut] ?? "Hors champ"
   return page({
     titre,
     user,
     chemin,
     nomPage: "erreur",
-    corps: `<main class="page page-etroite">
-      <p class="code-erreur">${statut}</p>
-      <h1>${e(titre)}</h1>
-      <p class="vide">${e(message)}</p>
-      <a class="play" href="/">Retour à l'accueil</a>
+    corps: `<main class="page page-erreur">
+      <section class="err" aria-labelledby="err-titre">
+        <span class="pf-croix pf-croix-hg" aria-hidden="true"></span>
+        <span class="pf-croix pf-croix-hd" aria-hidden="true"></span>
+        <span class="pf-croix pf-croix-bg" aria-hidden="true"></span>
+        <span class="pf-croix pf-croix-bd" aria-hidden="true"></span>
+        <span class="err-scan" aria-hidden="true"></span>
+        <div class="err-fond" aria-hidden="true"><span>${code}</span></div>
+        <div class="err-contenu">
+          <p class="err-etiquette">
+            <span class="pf-masque"><span>( Erreur ${code} )</span></span>
+            <span class="pf-masque"><span>${e(scene)}</span></span>
+          </p>
+          <div class="err-code-ligne">
+            <span class="err-code" aria-hidden="true">${code}</span>
+            <h1 class="err-titre" id="err-titre">${e(titre)}</h1>
+          </div>
+          <p class="err-texte">${e(message)}</p>
+          <form class="err-recherche" action="/recherche" method="get" role="search">
+            <label class="sr-only" for="err-q">Rechercher un film, une série ou un animé</label>
+            <input id="err-q" type="search" name="q" placeholder="Un titre à retrouver ?" minlength="2" required autocomplete="off">
+            <button type="submit">Rechercher
+              <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M5 12h13M13 6l6 6-6 6"/></svg>
+            </button>
+          </form>
+          <nav class="err-liens" aria-label="Pages utiles">
+            <a class="play" href="/">Retour à l'accueil</a>
+            <a class="btn-ligne" href="/catalogue">Explorer le catalogue</a>
+          </nav>
+        </div>
+        <div class="err-bas" aria-hidden="true">
+          <span>${e(scene)}</span>
+          <span class="err-track"><i></i></span>
+          <span>24 IPS · 2.39:1</span>
+        </div>
+      </section>
     </main>`,
   })
 }

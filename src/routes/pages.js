@@ -1377,6 +1377,134 @@ pagesRouter.get("/liste", async (req, res, next) => {
 
 // --- Profil -----------------------------------------------------------------
 
+// --- Statistiques de visionnage (profil) -----------------------------------------
+
+const MOIS_COURTS = ["janv.", "févr.", "mars", "avr.", "mai", "juin", "juil.", "août", "sept.", "oct.", "nov.", "déc."]
+
+/** Date du jour à Paris, en `YYYY-MM-DD`. */
+function aujourdhuiParis() {
+  return new Intl.DateTimeFormat("en-CA", { timeZone: "Europe/Paris" }).format(new Date())
+}
+
+/** `YYYY-MM-DD` ↔ jours depuis l'époque (calcul en UTC, sans fuseau). */
+const versJour = (iso) => Math.floor(Date.parse(`${iso}T00:00:00Z`) / 86_400_000)
+const versIso = (n) => new Date(n * 86_400_000).toISOString().slice(0, 10)
+
+/** 3 h 05 min, 42 min, 120 h… */
+function dureeVisionnage(secondes) {
+  const minutes = Math.round(secondes / 60)
+  if (minutes < 60) return `${minutes} min`
+  const heures = Math.floor(minutes / 60)
+  if (heures >= 100) return `${heures} h`
+  return `${heures} h ${String(minutes % 60).padStart(2, "0")} min`
+}
+
+function jourCourt(iso) {
+  const [, mois, jour] = iso.split("-").map(Number)
+  return `${jour} ${MOIS_COURTS[mois - 1]}`
+}
+
+function blocStatistiques(lignes) {
+  const aujourdhui = versJour(aujourdhuiParis())
+  const parJour = new Map()
+  for (const { jour, type, secondes } of lignes) {
+    const n = versJour(jour)
+    const entree = parJour.get(n) ?? { movie: 0, tv: 0 }
+    entree[type === "tv" ? "tv" : "movie"] += secondes
+    parJour.set(n, entree)
+  }
+  const total = (entree) => entree.movie + entree.tv
+
+  // Résumé d'une période : depuis `debut` (inclus) jusqu'à aujourd'hui.
+  const resume = (debut) => {
+    let films = 0
+    let series = 0
+    let actifs = 0
+    let meilleur = null
+    for (const [n, entree] of parJour) {
+      if (n < debut || n > aujourdhui) continue
+      films += entree.movie
+      series += entree.tv
+      if (total(entree) > 0) actifs += 1
+      if (!meilleur || total(entree) > total(parJour.get(meilleur))) meilleur = n
+    }
+    return { films, series, somme: films + series, actifs, jours: aujourdhui - debut + 1, meilleur }
+  }
+  const premier = [...parJour.keys()].sort((a, b) => a - b)[0] ?? aujourdhui
+  const periodes = [
+    { cle: "tout", libelle: "Depuis le début", ...resume(premier) },
+    { cle: "30", libelle: "30 derniers jours", ...resume(aujourdhui - 29) },
+  ]
+
+  const panneau = (p) => {
+    const films = p.somme > 0 ? Math.floor(p.somme / 7200) : 0
+    const phrase = p.somme <= 0
+      ? "Lance un film ou un épisode : ton temps de visionnage s'affichera ici."
+      : films >= 1
+        ? `Ça représente environ ${films} film${films > 1 ? "s" : ""} de 2 heures.`
+        : `Encore ${dureeVisionnage(7200 - p.somme)} pour atteindre l'équivalent d'un film de 2 heures.`
+    return `<div class="st-panneau st-${p.cle}">
+        <dl class="st-chiffres">
+          <div><dt>Temps de visionnage</dt><dd>${dureeVisionnage(p.somme)}</dd></div>
+          <div><dt>Jours actifs</dt><dd>${p.actifs}/${p.jours}</dd></div>
+          <div><dt>Jour le plus actif</dt><dd>${p.meilleur != null && p.somme > 0 ? jourCourt(versIso(p.meilleur)) : "—"}</dd></div>
+          <div><dt>Moyenne par jour actif</dt><dd>${p.actifs ? dureeVisionnage(p.somme / p.actifs) : "—"}</dd></div>
+        </dl>
+        <table class="st-table">
+          <thead><tr><th scope="col">Visionnage</th><th scope="col">${p.libelle}</th></tr></thead>
+          <tbody>
+            <tr><th scope="row">Films</th><td>${dureeVisionnage(p.films)}</td></tr>
+            <tr><th scope="row">Séries et animés</th><td>${dureeVisionnage(p.series)}</td></tr>
+          </tbody>
+          <tfoot><tr><th scope="row">Total</th><td>${dureeVisionnage(p.somme)}</td></tr></tfoot>
+        </table>
+        <p class="st-phrase">${phrase}</p>
+      </div>`
+  }
+
+  // Carte d'activité : 26 semaines, une colonne par semaine (lundi en haut).
+  const SEMAINES = 26
+  const jourSemaine = (n) => (new Date(n * 86_400_000).getUTCDay() + 6) % 7
+  const lundi = aujourdhui - jourSemaine(aujourdhui) - (SEMAINES - 1) * 7
+  const niveau = (s) => (s <= 0 ? 0 : s < 900 ? 1 : s < 2700 ? 2 : s < 5400 ? 3 : 4)
+  let cases = ""
+  let mois = ""
+  for (let n = lundi; n <= aujourdhui; n += 1) {
+    const colonne = Math.floor((n - lundi) / 7)
+    const iso = versIso(n)
+    const s = parJour.has(n) ? total(parJour.get(n)) : 0
+    cases += `<i class="st-case n${niveau(s)}" style="grid-column:${colonne + 1};grid-row:${jourSemaine(n) + 1}" title="${jourCourt(iso)} : ${s > 0 ? dureeVisionnage(s) : "rien"}"></i>`
+    // Étiquette de mois sur la colonne où il commence. Celle de la première
+    // colonne n'apparaît que s'il reste au moins 3 semaines avant le mois suivant.
+    const debutMois = iso.endsWith("-01")
+    if (debutMois || (n === lundi && Number(iso.slice(8, 10)) <= 10)) {
+      const m = Number(iso.slice(5, 7)) - 1
+      mois += `<span style="grid-column:${colonne + 1}">${MOIS_COURTS[m]}</span>`
+    }
+  }
+
+  return `<section class="st" aria-labelledby="st-titre">
+      <input class="sr-only" type="radio" name="st-periode" id="st-tout" checked>
+      <input class="sr-only" type="radio" name="st-periode" id="st-30">
+      <div class="st-entete">
+        <h2 id="st-titre">Statistiques</h2>
+        <div class="st-choix" role="group" aria-label="Période">
+          <label for="st-tout">Depuis le début</label>
+          <label for="st-30">30 jours</label>
+        </div>
+      </div>
+      <div class="st-carte" role="img" aria-label="Activité de visionnage sur les 26 dernières semaines">
+        <div class="st-mois" aria-hidden="true">${mois}</div>
+        <div class="st-grille-zone">
+          <div class="st-jours" aria-hidden="true"><span>lun.</span><span></span><span>mer.</span><span></span><span>ven.</span><span></span><span></span></div>
+          <div class="st-grille">${cases}</div>
+        </div>
+        <p class="st-legende" aria-hidden="true">Moins <i class="st-case n0"></i><i class="st-case n1"></i><i class="st-case n2"></i><i class="st-case n3"></i><i class="st-case n4"></i> Plus</p>
+      </div>
+      ${periodes.map(panneau).join("")}
+    </section>`
+}
+
 pagesRouter.get("/mentions-legales", (req, res) => {
   res.send(page({
     titre: "Mentions légales",
@@ -1427,7 +1555,11 @@ pagesRouter.get("/profil", async (req, res) => {
     }))
   }
 
-  const [comptes, etats] = await Promise.all([db.compteurs(req.user.id), etatsUtilisateur(req.user)])
+  const [comptes, etats, jours] = await Promise.all([
+    db.compteurs(req.user.id),
+    etatsUtilisateur(req.user),
+    db.joursVisionnage(req.user.id).catch(() => []),
+  ])
   const recents = await blocRecemmentVus(req.user, etats).catch(() => "")
   const membreDepuis = dateFr(req.user.created_at)
   // Le grand pseudo est posé sur la nameplate Discord (animée) quand il y en a une.
@@ -1489,6 +1621,8 @@ pagesRouter.get("/profil", async (req, res) => {
         ${stat("02", comptes.liste, "Ma liste", "/liste")}
         ${stat("03", comptes.vus, "Titres terminés")}
       </div>
+
+      ${blocStatistiques(jours)}
 
       ${recents ? `<section class="profil-recents">${recents}</section>` : ""}
 

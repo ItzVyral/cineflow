@@ -165,7 +165,7 @@
   // --- Projecteur : halo qui suit la souris sur les cartes -------------------
   function projecteur() {
     document.addEventListener("pointermove", (event) => {
-      const el = event.target.closest?.(".saison-carte, .vide-boite, .avis, .langue, .avis-cta, .form-avis")
+      const el = event.target.closest?.(".saison-carte, .vide-boite, .avis, .langue, .avis-cta, .form-avis, .err")
       if (!el) return
       const r = el.getBoundingClientRect()
       el.style.setProperty("--px", `${event.clientX - r.left}px`)

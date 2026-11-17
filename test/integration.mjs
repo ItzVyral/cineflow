@@ -322,7 +322,7 @@ const [usersCols, historyCols, vuesCols] = await Promise.all([colonnes("users"),
 const tables = (await db.requeteBrute(
   "SELECT table_name FROM information_schema.tables WHERE table_schema = current_schema() ORDER BY table_name",
 )).rows.map((t) => t.table_name)
-verifier("schéma : 6 tables", JSON.stringify(tables) === JSON.stringify(["favorites", "history", "recently_viewed", "schema_version", "users", "watchlist"]), JSON.stringify(tables))
+verifier("schéma : 7 tables", JSON.stringify(tables) === JSON.stringify(["favorites", "history", "recently_viewed", "schema_version", "users", "watch_days", "watchlist"]), JSON.stringify(tables))
 verifier("schéma : version à jour", (await db.requeteBrute("SELECT version FROM schema_version")).rows[0]?.version === db.versionSchema)
 verifier("schéma : users.nameplate", ["avatar_decoration", "nameplate_asset", "nameplate_palette"].every((n) => usersCols.has(n)))
 verifier("schéma : history.season/episode", ["season", "episode"].every((n) => historyCols.has(n)))
