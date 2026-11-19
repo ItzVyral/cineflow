@@ -1463,10 +1463,18 @@ function blocStatistiques(lignes) {
   }
 
   // Carte d'activité : 26 semaines, une colonne par semaine (lundi en haut).
+  // Palette : 1 min (n1) → 4 h (n4), répartie également entre les bornes.
   const SEMAINES = 26
+  const VISIONNAGE_MIN = 60
+  const VISIONNAGE_MAX = 4 * 3600
+  const PAS_COULEUR = (VISIONNAGE_MAX - VISIONNAGE_MIN) / 3
   const jourSemaine = (n) => (new Date(n * 86_400_000).getUTCDay() + 6) % 7
   const lundi = aujourdhui - jourSemaine(aujourdhui) - (SEMAINES - 1) * 7
-  const niveau = (s) => (s <= 0 ? 0 : s < 900 ? 1 : s < 2700 ? 2 : s < 5400 ? 3 : 4)
+  const niveau = (s) => {
+    if (s <= 0) return 0
+    if (s < VISIONNAGE_MIN) return 1
+    return Math.min(4, 1 + Math.floor((Math.min(s, VISIONNAGE_MAX) - VISIONNAGE_MIN) / PAS_COULEUR))
+  }
   let cases = ""
   let mois = ""
   for (let n = lundi; n <= aujourdhui; n += 1) {
@@ -1499,7 +1507,7 @@ function blocStatistiques(lignes) {
           <div class="st-jours" aria-hidden="true"><span>lun.</span><span></span><span>mer.</span><span></span><span>ven.</span><span></span><span></span></div>
           <div class="st-grille">${cases}</div>
         </div>
-        <p class="st-legende" aria-hidden="true">Moins <i class="st-case n0"></i><i class="st-case n1"></i><i class="st-case n2"></i><i class="st-case n3"></i><i class="st-case n4"></i> Plus</p>
+        <p class="st-legende" aria-hidden="true">${dureeVisionnage(VISIONNAGE_MIN)} <i class="st-case n0"></i><i class="st-case n1"></i><i class="st-case n2"></i><i class="st-case n3"></i><i class="st-case n4"></i> ${dureeVisionnage(VISIONNAGE_MAX)}</p>
       </div>
       ${periodes.map(panneau).join("")}
     </section>`

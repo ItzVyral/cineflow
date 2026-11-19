@@ -815,7 +815,7 @@ footer.pied{position:relative;overflow:hidden;margin-top:90px;padding:0;border-t
 .st-case.n2{background:#ff003373}
 .st-case.n3{background:#ff0033b3}
 .st-case.n4{background:#ff0033}
-.st-legende{max-width:760px;display:flex;align-items:center;justify-content:flex-end;gap:4px;margin:12px 0 0;font-size:12px;color:var(--doux)}
+.st-legende{max-width:760px;display:flex;align-items:center;justify-content:flex-end;gap:4px;margin:12px 0 0;font-size:12px;color:var(--doux);white-space:nowrap}
 .st-legende .st-case{width:11px;height:11px}
 .st-legende .st-case:first-of-type{margin-left:6px}
 .st-legende .st-case:last-of-type{margin-right:6px}
